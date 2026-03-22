@@ -20,7 +20,8 @@ function formatTime(iso: string): string {
 }
 
 export default function Chat({ onSendMessage }: ChatProps) {
-  const { messages, userId } = useStore();
+  const messages = useStore((s) => s.messages);
+  const userId = useStore((s) => s.userId);
   const [input, setInput] = useState('');
   const [showJump, setShowJump] = useState(false);
   const [pendingCount, setPendingCount] = useState(0);

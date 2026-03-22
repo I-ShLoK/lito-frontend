@@ -56,13 +56,17 @@ export default function Queue({
   onToggleSmartQueueEnabled,
   showSmartQueueSection = true,
 }: QueueProps) {
-  const { queue, currentTrack, userId } = useStore();
+  const queue = useStore((s) => s.queue);
+  const currentTrack = useStore((s) => s.currentTrack);
+  const userId = useStore((s) => s.userId);
   const [query, setQuery] = useState('');
   const [results, setResults] = useState<VideoResult[]>([]);
   const [searching, setSearching] = useState(false);
   const [showResults, setShowResults] = useState(false);
   const [draggingId, setDraggingId] = useState<string | null>(null);
   const [menuTargetId, setMenuTargetId] = useState<string | null>(null);
+  const [queueScrollTop, setQueueScrollTop] = useState(0);
+  const queueListRef = useRef<HTMLDivElement | null>(null);
   const longPressTimerRef = useRef<NodeJS.Timeout | null>(null);
   const wrapperRef = useRef<HTMLDivElement>(null);
 
@@ -232,7 +236,11 @@ export default function Queue({
         </div>
       )}
 
-      <div className="flex-1 overflow-y-auto px-2 pb-2">
+      <div
+        ref={queueListRef}
+        className="flex-1 overflow-y-auto px-2 pb-2"
+        onScroll={(e) => setQueueScrollTop((e.target as HTMLDivElement).scrollTop)}
+      >
         <AnimatePresence>
           {queue.length === 0 ? (
             <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="text-center text-t3 text-sm py-8 px-4 space-y-3">
@@ -264,7 +272,20 @@ export default function Queue({
               )}
             </motion.div>
           ) : (
-            queue.map((item, i) => {
+            (() => {
+              const rowH = 70;
+              const viewport = 520;
+              const overscan = 4;
+              const startIndex = Math.max(0, Math.floor(queueScrollTop / rowH) - overscan);
+              const endIndex = Math.min(queue.length, Math.ceil((queueScrollTop + viewport) / rowH) + overscan);
+              const visibleQueue = queue.slice(startIndex, endIndex);
+              const topPad = startIndex * rowH;
+              const bottomPad = Math.max(0, (queue.length - endIndex) * rowH);
+              return (
+                <>
+                  <div style={{ height: topPad }} />
+                  {visibleQueue.map((item, offset) => {
+              const i = startIndex + offset;
               const isCurrent = currentTrack?.youtubeId === item.youtubeId && i === 0;
               const canRemove = isHostOrDj || item.addedBy === userId;
               return (
@@ -311,9 +332,9 @@ export default function Queue({
                       ||
                     </span>
                   )}
-                  <div className="w-10 h-10 rounded-lg overflow-hidden flex-shrink-0 bg-elevated">
+                  <motion.div layoutId={`track-art-${item.youtubeId}`} className="w-10 h-10 rounded-lg overflow-hidden flex-shrink-0 bg-elevated">
                     <Thumb src={item.thumbnailUrl || `https://i.ytimg.com/vi/${item.youtubeId}/hqdefault.jpg`} alt="" className="w-full h-full object-cover" />
-                  </div>
+                  </motion.div>
                   <div className="flex-1 min-w-0">
                     <p className={`text-xs font-medium truncate ${isCurrent ? 'text-accent' : 'text-t1'}`}>{item.title}</p>
                     <p className="text-xs text-t3 truncate">
@@ -329,7 +350,11 @@ export default function Queue({
                   )}
                 </motion.div>
               );
-            })
+            })}
+                  <div style={{ height: bottomPad }} />
+                </>
+              );
+            })()
           )}
         </AnimatePresence>
 

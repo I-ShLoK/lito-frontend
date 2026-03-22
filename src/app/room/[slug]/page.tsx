@@ -15,6 +15,11 @@ import Thumb from '@/components/Thumb';
 import InstallAppButton from '@/components/InstallAppButton';
 import api from '@/lib/api';
 
+const SEARCH_CACHE_TTL_MS = 45_000;
+const RECO_CACHE_TTL_MS = 60_000;
+const searchCache = new Map<string, { ts: number; data: Suggestion[] }>();
+const recoCache = new Map<string, { ts: number; data: Suggestion[] }>();
+
 function formatTime(ms: number): string {
   if (!ms || Number.isNaN(ms) || ms <= 0) return '0:00';
   const s = Math.floor(ms / 1000);
@@ -116,6 +121,10 @@ async function fetchPersonalizedRecommendations(
   roomArtists: string[],
   maxItems = 16
 ): Promise<Suggestion[]> {
+  const recoCacheKey = `${currentTrack.youtubeId}::${roomArtists.map((a) => a.toLowerCase()).join('|')}::${queue.length}`;
+  const cached = recoCache.get(recoCacheKey);
+  if (cached && Date.now() - cached.ts < RECO_CACHE_TTL_MS) return cached.data;
+
   const cleanTitle = currentTrack.title.split('|')[0].trim();
   const mainArtist = (currentTrack.artist || '').split(',')[0].trim();
   const langHint = detectLanguageHintFromText(`${currentTrack.artist} ${cleanTitle}`);
@@ -187,7 +196,9 @@ async function fetchPersonalizedRecommendations(
     if (selected.length >= maxItems) break;
   }
 
-  return selected.map(({ __score, __artistNorm, __tokens, ...rest }) => rest);
+  const final = selected.map(({ __score, __artistNorm, __tokens, ...rest }) => rest);
+  recoCache.set(recoCacheKey, { ts: Date.now(), data: final });
+  return final;
 }
 
 function isLikelyMusicResult(item: Suggestion): boolean {
@@ -264,6 +275,9 @@ function SearchResultsPanel({
   const [results, setResults] = useState<Suggestion[]>([]);
   const [playlistMode, setPlaylistMode] = useState(false);
   const [recentSearches, setRecentSearches] = useState<string[]>([]);
+  const [scrollTop, setScrollTop] = useState(0);
+  const listRef = useRef<HTMLDivElement | null>(null);
+  const abortRef = useRef<AbortController | null>(null);
   const trimmedQuery = query.trim();
   const detectedPlaylist = isPlaylistLink(trimmedQuery);
   const detectedYoutube = !!extractYouTubeId(trimmedQuery);
@@ -290,6 +304,10 @@ function SearchResultsPanel({
 
   useEffect(() => {
     const q = query.trim();
+    if (abortRef.current) {
+      abortRef.current.abort();
+      abortRef.current = null;
+    }
     if (!q) {
       setResults([]);
       setPlaylistMode(false);
@@ -297,11 +315,13 @@ function SearchResultsPanel({
     }
 
     const t = setTimeout(async () => {
+      const controller = new AbortController();
+      abortRef.current = controller;
       setLoading(true);
       try {
         if (isPlaylistLink(q)) {
           pushRecentSearch(q);
-          const importRes = await api.post('/api/music/import-playlist', { url: q });
+          const importRes = await api.post('/api/music/import-playlist', { url: q }, { signal: controller.signal });
           setPlaylistMode(true);
           const imported = (importRes.data || []) as Suggestion[];
           setResults(imported);
@@ -326,20 +346,45 @@ function SearchResultsPanel({
         } else {
           pushRecentSearch(q);
           setPlaylistMode(false);
-          const res = await api.get(`/api/music/search?q=${encodeURIComponent(q)}`);
-          setResults((res.data || []) as Suggestion[]);
+          const cacheKey = q.toLowerCase();
+          const cached = searchCache.get(cacheKey);
+          if (cached && Date.now() - cached.ts < SEARCH_CACHE_TTL_MS) {
+            setResults(cached.data);
+          } else {
+            const res = await api.get(`/api/music/search?q=${encodeURIComponent(q)}`, { signal: controller.signal });
+            const data = (res.data || []) as Suggestion[];
+            searchCache.set(cacheKey, { ts: Date.now(), data });
+            setResults(data);
+          }
         }
-      } catch {
+      } catch (err) {
+        if ((err as { name?: string }).name === 'CanceledError' || (err as { name?: string }).name === 'AbortError') return;
         setResults([]);
         setPlaylistMode(false);
         if (isPlaylistLink(q)) toast.error('Playlist import failed. Please retry with the playlist URL.');
       } finally {
         setLoading(false);
+        if (abortRef.current === controller) abortRef.current = null;
       }
     }, 300);
 
-    return () => clearTimeout(t);
+    return () => {
+      clearTimeout(t);
+      if (abortRef.current) {
+        abortRef.current.abort();
+        abortRef.current = null;
+      }
+    };
   }, [query, pushRecentSearch]);
+
+  const rowHeight = 66;
+  const viewportHeight = 420;
+  const overscan = 4;
+  const startIndex = Math.max(0, Math.floor(scrollTop / rowHeight) - overscan);
+  const endIndex = Math.min(results.length, Math.ceil((scrollTop + viewportHeight) / rowHeight) + overscan);
+  const visibleResults = results.slice(startIndex, endIndex);
+  const topPad = startIndex * rowHeight;
+  const bottomPad = Math.max(0, (results.length - endIndex) * rowHeight);
 
   if (loading) {
     return (
@@ -410,7 +455,11 @@ function SearchResultsPanel({
           )}
         </div>
       ) : (
-        <div className="overflow-y-auto h-full p-2 space-y-1">
+        <div
+          ref={listRef}
+          className="overflow-y-auto h-full p-2"
+          onScroll={(e) => setScrollTop((e.target as HTMLDivElement).scrollTop)}
+        >
           {playlistMode && results.length > 0 && (
             <button
               onClick={() => {
@@ -429,7 +478,8 @@ function SearchResultsPanel({
               Import Playlist ({results.length} songs)
             </button>
           )}
-          {results.map((r) => (
+          <div style={{ height: topPad }} />
+          {visibleResults.map((r) => (
             <div key={r.id} className="flex items-center gap-3 p-2 rounded-xl hover:bg-elevated group">
               <div className="w-11 h-11 rounded-lg overflow-hidden bg-elevated">
                 <Thumb src={r.thumbnailUrl || `https://i.ytimg.com/vi/${r.id}/hqdefault.jpg`} alt="" className="w-full h-full object-cover" />
@@ -446,6 +496,7 @@ function SearchResultsPanel({
               </button>
             </div>
           ))}
+          <div style={{ height: bottomPad }} />
         </div>
       )}
     </div>
@@ -819,11 +870,11 @@ function PlayerCore({
 
   return (
     <div className="mx-auto max-w-md">
-        <div className="aspect-square rounded-2xl overflow-hidden bg-elevated mb-4 shadow-2xl">
+        <motion.div layoutId={currentTrack ? `track-art-${currentTrack.youtubeId}` : 'track-art-empty'} className="aspect-square rounded-2xl overflow-hidden bg-elevated mb-4 shadow-2xl">
           {currentTrack?.thumbnailUrl
             ? <Thumb src={currentTrack.thumbnailUrl} alt={currentTrack.title} className="w-full h-full object-cover" />
             : <div className="w-full h-full flex items-center justify-center text-6xl text-t3">♪</div>}
-        </div>
+        </motion.div>
 
         <div className="text-center mb-3">
           <p className="font-display text-2xl text-t1 truncate">{currentTrack?.title || 'Nothing playing'}</p>
@@ -1452,8 +1503,15 @@ export default function RoomPage() {
                   if (tab.id === 'room') setMobileRoomPanel('home');
                 }}
                 aria-label={tab.label}
-                className={`relative h-11 rounded-2xl flex items-center justify-center transition-all active:scale-95 ${mobileTab === tab.id ? 'bg-accent text-bg shadow-[0_10px_30px_rgba(255,255,255,0.22)] scale-[1.02]' : 'text-t2 bg-white/[0.04]'}`}
+                className={`relative h-11 rounded-2xl flex items-center justify-center transition-all active:scale-95 ${mobileTab === tab.id ? 'text-bg shadow-[0_10px_30px_rgba(255,255,255,0.22)] scale-[1.02]' : 'text-t2 bg-white/[0.04]'}`}
               >
+                {mobileTab === tab.id && (
+                  <motion.span
+                    layoutId="mobile-top-tab-indicator"
+                    transition={{ type: 'spring', stiffness: 420, damping: 34 }}
+                    className="absolute inset-0 rounded-2xl bg-accent -z-[1]"
+                  />
+                )}
                 {tab.icon}
                 {tab.id === 'chat' && unreadChatCount > 0 && (
                   <span className="absolute -top-1 -right-1 min-w-[18px] h-[18px] px-1 rounded-full bg-red-500 text-[10px] leading-[18px] text-white text-center">
@@ -1577,13 +1635,16 @@ export default function RoomPage() {
                           </div>
                         </div>
                         <div className="apple-glass glow-accent rounded-[24px] px-4 py-2 flex items-center justify-around">
-                          <button onClick={() => { triggerHaptic(); setMobilePlayerPanel('search'); }} className={`h-11 w-11 rounded-2xl flex items-center justify-center active:scale-95 ${mobilePlayerPanel === 'search' ? 'bg-accent text-bg shadow-[0_10px_30px_rgba(255,255,255,0.22)]' : 'text-t2'}`} aria-label="Search">
+                          <button onClick={() => { triggerHaptic(); setMobilePlayerPanel('search'); }} className={`relative h-11 w-11 rounded-2xl flex items-center justify-center active:scale-95 ${mobilePlayerPanel === 'search' ? 'text-bg shadow-[0_10px_30px_rgba(255,255,255,0.22)]' : 'text-t2'}`} aria-label="Search">
+                            {mobilePlayerPanel === 'search' && <motion.span layoutId="mobile-player-tab-indicator" transition={{ type: 'spring', stiffness: 420, damping: 34 }} className="absolute inset-0 rounded-2xl bg-accent -z-[1]" />}
                             <SearchIcon />
                           </button>
-                          <button onClick={() => { triggerHaptic(); setMobilePlayerPanel('recommendations'); }} className={`h-11 w-11 rounded-2xl flex items-center justify-center active:scale-95 ${mobilePlayerPanel === 'recommendations' ? 'bg-accent text-bg shadow-[0_10px_30px_rgba(255,255,255,0.22)]' : 'text-t2'}`} aria-label="Recommendations">
+                          <button onClick={() => { triggerHaptic(); setMobilePlayerPanel('recommendations'); }} className={`relative h-11 w-11 rounded-2xl flex items-center justify-center active:scale-95 ${mobilePlayerPanel === 'recommendations' ? 'text-bg shadow-[0_10px_30px_rgba(255,255,255,0.22)]' : 'text-t2'}`} aria-label="Recommendations">
+                            {mobilePlayerPanel === 'recommendations' && <motion.span layoutId="mobile-player-tab-indicator" transition={{ type: 'spring', stiffness: 420, damping: 34 }} className="absolute inset-0 rounded-2xl bg-accent -z-[1]" />}
                             <RecommendIcon />
                           </button>
-                          <button onClick={() => { triggerHaptic(); setMobilePlayerPanel('queue'); }} className={`h-11 w-11 rounded-2xl flex items-center justify-center active:scale-95 ${mobilePlayerPanel === 'queue' ? 'bg-accent text-bg shadow-[0_10px_30px_rgba(255,255,255,0.22)]' : 'text-t2'}`} aria-label="Queue">
+                          <button onClick={() => { triggerHaptic(); setMobilePlayerPanel('queue'); }} className={`relative h-11 w-11 rounded-2xl flex items-center justify-center active:scale-95 ${mobilePlayerPanel === 'queue' ? 'text-bg shadow-[0_10px_30px_rgba(255,255,255,0.22)]' : 'text-t2'}`} aria-label="Queue">
+                            {mobilePlayerPanel === 'queue' && <motion.span layoutId="mobile-player-tab-indicator" transition={{ type: 'spring', stiffness: 420, damping: 34 }} className="absolute inset-0 rounded-2xl bg-accent -z-[1]" />}
                             <QueueIcon />
                           </button>
                         </div>
