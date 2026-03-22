@@ -253,7 +253,7 @@ export function useSocket() {
   const toggleLoop = useCallback(() => emit('TOGGLE_LOOP'), [emit]);
   const sendChat = useCallback((message: string) => emit('CHAT', { message }), [emit]);
   const toggleDjMode = useCallback(() => emit('TOGGLE_DJ_MODE'), [emit]);
-  const trackEnded = useCallback(() => emit('TRACK_ENDED'), [emit]);
+  const trackEnded = useCallback((endedTrackId?: string) => emit('TRACK_ENDED', { endedTrackId }), [emit]);
   const syncRequest = useCallback(() => {
     const socket = socketRef.current || getSocket();
     doNtpSync(socket, 3);

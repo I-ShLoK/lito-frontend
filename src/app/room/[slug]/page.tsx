@@ -349,7 +349,8 @@ export default function RoomPage() {
   const [mobilePlayerPanel, setMobilePlayerPanel] = useState<'search' | 'recommendations' | 'queue'>('search');
   const [mobileSearchQuery, setMobileSearchQuery] = useState('');
   const [desktopSocialTab, setDesktopSocialTab] = useState<'chat' | 'people'>('chat');
-  const [desktopLeftTab, setDesktopLeftTab] = useState<'queue' | 'recommendations'>('queue');
+  const [desktopLeftTab, setDesktopLeftTab] = useState<'queue' | 'search' | 'recommendations'>('queue');
+  const [desktopSearchQuery, setDesktopSearchQuery] = useState('');
 
   const touchStartXRef = useRef<number | null>(null);
   const warnedLastTrackRef = useRef<string | null>(null);
@@ -498,7 +499,7 @@ export default function RoomPage() {
     const onSwipeEnd = (x: number) => {
       if (touchStartXRef.current === null) return;
       const deltaX = x - touchStartXRef.current;
-      if (Math.abs(deltaX) < 45) return;
+      if (Math.abs(deltaX) < 90) return;
       if (deltaX < 0 && currentIndex < tabOrder.length - 1) setMobileTab(tabOrder[currentIndex + 1]);
       if (deltaX > 0 && currentIndex > 0) setMobileTab(tabOrder[currentIndex - 1]);
     };
@@ -635,16 +636,24 @@ export default function RoomPage() {
         <div className="grid gap-4" style={{ gridTemplateColumns: '360px minmax(480px, 1fr) 360px' }}>
           <div className="apple-glass rounded-2xl overflow-hidden min-h-[78vh] flex flex-col">
             <div className="flex border-b border-[var(--border)]">
-              {(['queue', 'recommendations'] as const).map((tab) => (
+              {(['queue', 'search', 'recommendations'] as const).map((tab) => (
                 <button key={tab} onClick={() => setDesktopLeftTab(tab)} className={`flex-1 py-2.5 text-xs uppercase tracking-wider ${desktopLeftTab === tab ? 'text-accent border-b-2 border-accent' : 'text-t3'}`}>
                   {tab}
                 </button>
               ))}
             </div>
             <div className="flex-1 min-h-0 overflow-hidden">
-              {desktopLeftTab === 'queue'
-                ? <Queue onAddToQueue={addToQueue} onRemoveFromQueue={removeFromQueue} onReorderQueue={reorderQueue} isHostOrDj={isHostOrDj} showSearch={false} />
-                : <RecommendationsPanel onAddToQueue={addToQueue} />}
+              {desktopLeftTab === 'queue' && (
+                <Queue onAddToQueue={addToQueue} onRemoveFromQueue={removeFromQueue} onReorderQueue={reorderQueue} isHostOrDj={isHostOrDj} showSearch={false} />
+              )}
+              {desktopLeftTab === 'search' && (
+                <SearchResultsPanel
+                  query={desktopSearchQuery}
+                  onQueryChange={setDesktopSearchQuery}
+                  onAddToQueue={addToQueueFromSearch}
+                />
+              )}
+              {desktopLeftTab === 'recommendations' && <RecommendationsPanel onAddToQueue={addToQueue} />}
             </div>
           </div>
 

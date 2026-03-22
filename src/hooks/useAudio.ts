@@ -1,4 +1,4 @@
-'use client';
+﻿'use client';
 
 import { useEffect, useRef, useCallback } from 'react';
 import { useStore } from '@/store';
@@ -9,7 +9,7 @@ interface UseAudioOptions {
   isHost: boolean;
   djMode: boolean;
   timeOffsetRef: React.MutableRefObject<number>;
-  onTrackEnded: () => void;
+  onTrackEnded: (endedTrackId?: string) => void;
   onPlay: (positionMs: number) => void;
   onPause: (positionMs: number) => void;
 }
@@ -24,8 +24,10 @@ export function useAudio({
 }: UseAudioOptions) {
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const driftIntervalRef = useRef<NodeJS.Timeout>();
+  const startFallbackTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const skipDriftUntilRef = useRef(0);
   const lastHardCorrectionRef = useRef(0);
+  const pendingPlayRef = useRef(false);
   const { playbackState, currentTrack, updateLocalPosition } = useStore();
 
   const getExpected = useCallback((state: typeof playbackState): number => {
@@ -43,15 +45,15 @@ export function useAudio({
     }
     return () => {
       if (driftIntervalRef.current) clearInterval(driftIntervalRef.current);
+      if (startFallbackTimeoutRef.current) clearTimeout(startFallbackTimeoutRef.current);
     };
   }, []);
 
-  // Load track when it changes — always start fresh from pos 0
+  // Load track when it changes; always start fresh and recover on slow readiness
   useEffect(() => {
     const audio = audioRef.current;
     if (!audio || !currentTrack) return;
 
-    // Stop current playback first
     audio.pause();
     audio.src = '';
 
@@ -59,21 +61,42 @@ export function useAudio({
     audio.src = streamUrl;
     audio.load();
 
-    // Wait until the audio is ready before seeking + playing
-    const handleCanPlay = () => {
-      // positionMs should be 0 for a new track from the server
+    const syncAndTryPlay = () => {
       const pos = Math.max(0, playbackState.positionMs);
       audio.currentTime = pos / 1000;
-      if (playbackState.isPlaying) {
-        audio.play().catch(() => {});
-      }
-      audio.removeEventListener('canplay', handleCanPlay);
+      if (!playbackState.isPlaying) return;
+
+      audio.play().then(() => {
+        pendingPlayRef.current = false;
+      }).catch(() => {
+        // Usually autoplay/gesture restriction. We'll retry on user interaction.
+        pendingPlayRef.current = true;
+      });
     };
 
-    audio.addEventListener('canplay', handleCanPlay);
+    const handleCanPlayOrMetadata = () => {
+      syncAndTryPlay();
+      audio.removeEventListener('canplay', handleCanPlayOrMetadata);
+      audio.removeEventListener('loadedmetadata', handleCanPlayOrMetadata);
+    };
+
+    audio.addEventListener('canplay', handleCanPlayOrMetadata);
+    audio.addEventListener('loadedmetadata', handleCanPlayOrMetadata);
+
+    if (startFallbackTimeoutRef.current) clearTimeout(startFallbackTimeoutRef.current);
+    startFallbackTimeoutRef.current = setTimeout(() => {
+      if (!playbackState.isPlaying) return;
+      if (audio.readyState < 2) return;
+      syncAndTryPlay();
+    }, 2500);
 
     return () => {
-      audio.removeEventListener('canplay', handleCanPlay);
+      if (startFallbackTimeoutRef.current) {
+        clearTimeout(startFallbackTimeoutRef.current);
+        startFallbackTimeoutRef.current = null;
+      }
+      audio.removeEventListener('canplay', handleCanPlayOrMetadata);
+      audio.removeEventListener('loadedmetadata', handleCanPlayOrMetadata);
     };
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [currentTrack?.youtubeId]);
@@ -86,22 +109,46 @@ export function useAudio({
     const expectedMs = getExpected(playbackState);
     const actualMs = audio.currentTime * 1000;
     const drift = Math.abs(expectedMs - actualMs);
-    skipDriftUntilRef.current = Date.now() + 1200;
+    skipDriftUntilRef.current = Date.now() + 2500;
 
     if (playbackState.isPlaying) {
-      if (drift > 250) {
+      if (drift > 600) {
         audio.currentTime = expectedMs / 1000;
       }
-      audio.play().catch(() => {});
+      audio.play().then(() => {
+        pendingPlayRef.current = false;
+      }).catch(() => {
+        pendingPlayRef.current = true;
+      });
     } else {
       audio.pause();
+      pendingPlayRef.current = false;
       audio.playbackRate = 1;
-      if (Math.abs(playbackState.positionMs - actualMs) > 150) {
+      if (Math.abs(playbackState.positionMs - actualMs) > 250) {
         audio.currentTime = playbackState.positionMs / 1000;
       }
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [playbackState.isPlaying, playbackState.positionMs, playbackState.timestamp]);
+
+  // If autoplay is blocked, retry once user interacts.
+  useEffect(() => {
+    const retryPendingPlay = () => {
+      const audio = audioRef.current;
+      if (!audio || !pendingPlayRef.current || !playbackState.isPlaying) return;
+      audio.play().then(() => {
+        pendingPlayRef.current = false;
+      }).catch(() => {});
+    };
+
+    window.addEventListener('pointerdown', retryPendingPlay);
+    window.addEventListener('keydown', retryPendingPlay);
+
+    return () => {
+      window.removeEventListener('pointerdown', retryPendingPlay);
+      window.removeEventListener('keydown', retryPendingPlay);
+    };
+  }, [playbackState.isPlaying]);
 
   // Drift correction + position tracking
   useEffect(() => {
@@ -116,19 +163,17 @@ export function useAudio({
       const actual = audio.currentTime * 1000;
       const drift = Math.abs(expected - actual);
 
-      // Avoid repeated hard seeks right after network/control events.
-      if (drift > 900 && Date.now() - lastHardCorrectionRef.current > 2500) {
+      if (drift > 1500 && Date.now() - lastHardCorrectionRef.current > 4000) {
         audio.currentTime = expected / 1000;
         lastHardCorrectionRef.current = Date.now();
-      } else if (drift > 300) {
-        // Soft correction reduces audible jumps on unstable networks.
-        audio.playbackRate = expected > actual ? 1.04 : 0.96;
+      } else if (drift > 450) {
+        audio.playbackRate = expected > actual ? 1.02 : 0.98;
       } else if (Math.abs(audio.playbackRate - 1) > 0.001) {
         audio.playbackRate = 1;
       }
 
       updateLocalPosition(actual);
-    }, 1000);
+    }, 250);
 
     return () => clearInterval(driftIntervalRef.current);
   }, [playbackState, getExpected, updateLocalPosition]);
@@ -138,7 +183,6 @@ export function useAudio({
     const audio = audioRef.current;
     if (!audio) return;
 
-    // Audio error: silent reload — NEVER skip
     const handleError = () => {
       const currentSrc = audio.src;
       if (!currentSrc) return;
@@ -148,15 +192,18 @@ export function useAudio({
         if (playbackState.isPlaying) {
           const expected = getExpected(playbackState);
           audio.currentTime = expected / 1000;
-          audio.play().catch(() => {});
+          audio.play().then(() => {
+            pendingPlayRef.current = false;
+          }).catch(() => {
+            pendingPlayRef.current = true;
+          });
         }
       }, 1000);
     };
 
-    // Natural end — only host or DJ emits TRACK_ENDED
     const handleEnded = () => {
       if (isHost || djMode) {
-        onTrackEnded();
+        onTrackEnded(currentTrack?.youtubeId);
       }
     };
 
@@ -167,7 +214,7 @@ export function useAudio({
       audio.removeEventListener('error', handleError);
       audio.removeEventListener('ended', handleEnded);
     };
-  }, [playbackState, isHost, djMode, onTrackEnded, getExpected]);
+  }, [playbackState, isHost, djMode, onTrackEnded, getExpected, currentTrack?.youtubeId]);
 
   // MediaSession API
   useEffect(() => {
