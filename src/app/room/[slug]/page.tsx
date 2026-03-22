@@ -966,14 +966,15 @@ export default function RoomPage() {
   const [mobilePlayerPanel, setMobilePlayerPanel] = useState<'search' | 'recommendations' | 'queue'>('search');
   const [mobilePanelSnap, setMobilePanelSnap] = useState<35 | 65 | 92>(65);
   const [mobileSearchQuery, setMobileSearchQuery] = useState('');
+  const [swipePreviewX, setSwipePreviewX] = useState(0);
   const [desktopSocialTab, setDesktopSocialTab] = useState<'chat' | 'people'>('chat');
-  const [desktopLeftTab, setDesktopLeftTab] = useState<'queue' | 'search' | 'recommendations'>('queue');
+  const [desktopLeftTab, setDesktopLeftTab] = useState<'home' | 'queue' | 'search' | 'recommendations'>('home');
   const [desktopSearchQuery, setDesktopSearchQuery] = useState('');
   const [desktopLeftOpen, setDesktopLeftOpen] = useState(false);
   const [desktopRightOpen, setDesktopRightOpen] = useState(false);
   const [desktopLeftWidth, setDesktopLeftWidth] = useState(360);
   const [desktopRightWidth, setDesktopRightWidth] = useState(360);
-  const [desktopDockActive, setDesktopDockActive] = useState<'search' | 'recommendations' | 'queue' | 'chat'>('queue');
+  const [desktopDockActive, setDesktopDockActive] = useState<'home' | 'search' | 'recommendations' | 'queue' | 'chat'>('home');
   const [showShortcutHelp, setShowShortcutHelp] = useState(false);
   const [unreadChatCount, setUnreadChatCount] = useState(0);
   const [homeLanguage, setHomeLanguage] = useState<HomeLanguage>('english');
@@ -989,6 +990,7 @@ export default function RoomPage() {
   const warnedLastTrackRef = useRef<string | null>(null);
   const prevMessageCountRef = useRef(0);
   const smartQueueAutoRef = useRef('');
+  const playedCanonRef = useRef<string[]>([]);
   const drawerResizeRef = useRef<'left' | 'right' | null>(null);
   const isHost = userId === hostId;
   const isHostOrDj = isHost || djMode;
@@ -1106,7 +1108,7 @@ export default function RoomPage() {
     const savedPlayerPanel = window.localStorage.getItem('lito-pref-mobile-player-panel');
     if (savedPlayerPanel === 'search' || savedPlayerPanel === 'recommendations' || savedPlayerPanel === 'queue') setMobilePlayerPanel(savedPlayerPanel);
     const savedDesktopLeft = window.localStorage.getItem('lito-pref-desktop-left');
-    if (savedDesktopLeft === 'queue' || savedDesktopLeft === 'search' || savedDesktopLeft === 'recommendations') setDesktopLeftTab(savedDesktopLeft);
+    if (savedDesktopLeft === 'home' || savedDesktopLeft === 'queue' || savedDesktopLeft === 'search' || savedDesktopLeft === 'recommendations') setDesktopLeftTab(savedDesktopLeft);
     const savedSmartEnabled = window.localStorage.getItem('lito-smart-queue-enabled');
     if (savedSmartEnabled === '0' || savedSmartEnabled === '1') setSmartQueueEnabled(savedSmartEnabled === '1');
     const savedLeftWidth = Number(window.localStorage.getItem('lito-pref-desktop-left-width') || '360');
@@ -1195,6 +1197,13 @@ export default function RoomPage() {
   }, [currentTrack?.youtubeId, playbackState.isPlaying, queue.length]);
 
   useEffect(() => {
+    if (!currentTrack) return;
+    const key = canonicalSongKey(currentTrack.title || '', currentTrack.artist || '');
+    if (!key) return;
+    playedCanonRef.current = [key, ...playedCanonRef.current.filter((x) => x !== key)].slice(0, 60);
+  }, [currentTrack, currentTrack?.youtubeId, currentTrack?.title, currentTrack?.artist]);
+
+  useEffect(() => {
     const recoverSync = () => {
       if (typeof document !== 'undefined' && document.visibilityState === 'hidden') return;
       syncRequest();
@@ -1279,6 +1288,13 @@ export default function RoomPage() {
         setDesktopSocialTab('chat');
         return;
       }
+      if (key === 'h') {
+        e.preventDefault();
+        setDesktopLeftOpen(true);
+        setDesktopLeftTab('home');
+        setDesktopDockActive('home');
+        return;
+      }
       if (key === '?') {
         e.preventDefault();
         setShowShortcutHelp((v) => !v);
@@ -1338,9 +1354,19 @@ export default function RoomPage() {
       roomArtists,
       12
     )
-      .then((items) => {
+      .then(async (items) => {
         if (!mounted) return;
-        setSmartQueueItems(items);
+        const recentSet = new Set(playedCanonRef.current);
+        let filtered = items.filter((x) => !recentSet.has(canonicalSongKey(x.title || '', x.artist || '')));
+        if (filtered.length === 0) {
+          const langHint = detectLanguageHintFromText(`${currentTrack.title} ${currentTrack.artist}`);
+          const fallback = await api.get(`/api/music/search?q=${encodeURIComponent(`${langHint} official songs`)}`).then((r) => r.data as Suggestion[]).catch(() => []);
+          filtered = fallback.filter((x) => {
+            const key = canonicalSongKey(x.title || '', x.artist || '');
+            return !!x?.id && !recentSet.has(key);
+          }).slice(0, 12);
+        }
+        setSmartQueueItems(filtered);
       })
       .finally(() => {
         if (mounted) setSmartQueueLoading(false);
@@ -1357,37 +1383,46 @@ export default function RoomPage() {
       smartQueueAutoRef.current = '';
       return;
     }
-    if (smartQueueItems.length === 0) return;
+    const autoInsert = async () => {
+      let next = smartQueueItems[0];
+      if (!next) {
+        const langHint = detectLanguageHintFromText(`${currentTrack.title} ${currentTrack.artist}`);
+        const fallback = await api.get(`/api/music/search?q=${encodeURIComponent(`${langHint} official songs`)}`).then((r) => r.data as Suggestion[]).catch(() => []);
+        next = (fallback || [])[0];
+      }
+      if (!next) return;
 
-    const next = smartQueueItems[0];
-    const fingerprint = `${currentTrack.youtubeId}:${next.id}`;
-    if (smartQueueAutoRef.current === fingerprint) return;
-    smartQueueAutoRef.current = fingerprint;
+      const fingerprint = `${currentTrack.youtubeId}:${next.id}`;
+      if (smartQueueAutoRef.current === fingerprint) return;
+      smartQueueAutoRef.current = fingerprint;
 
-    const optimistic: QueueItem = {
-      id: `optimistic-smart-${Date.now()}-${Math.random().toString(16).slice(2, 8)}`,
-      position: queue.length,
-      votes: 0,
-      addMode: 'end',
-      addedBy: userId,
-      addedByUsername: useStore.getState().username || 'smart queue',
-      trackId: next.id,
-      youtubeId: next.id,
-      title: next.title,
-      artist: next.artist,
-      durationMs: next.durationMs,
-      thumbnailUrl: next.thumbnailUrl,
+      const optimistic: QueueItem = {
+        id: `optimistic-smart-${Date.now()}-${Math.random().toString(16).slice(2, 8)}`,
+        position: queue.length,
+        votes: 0,
+        addMode: 'end',
+        addedBy: userId,
+        addedByUsername: useStore.getState().username || 'smart queue',
+        trackId: next.id,
+        youtubeId: next.id,
+        title: next.title,
+        artist: next.artist,
+        durationMs: next.durationMs,
+        thumbnailUrl: next.thumbnailUrl,
+      };
+      setQueue([...useStore.getState().queue, optimistic]);
+      addToQueue({
+        youtubeId: next.id,
+        title: next.title,
+        artist: next.artist,
+        durationMs: next.durationMs,
+        thumbnailUrl: next.thumbnailUrl,
+        mode: 'end',
+      });
+      toast('Smart queue picked the next song', { duration: 2200 });
     };
-    setQueue([...useStore.getState().queue, optimistic]);
-    addToQueue({
-      youtubeId: next.id,
-      title: next.title,
-      artist: next.artist,
-      durationMs: next.durationMs,
-      thumbnailUrl: next.thumbnailUrl,
-      mode: 'end',
-    });
-    toast('Smart queue picked the next song', { duration: 2200 });
+
+    void autoInsert();
   }, [smartQueueEnabled, isHostOrDj, currentTrack, currentTrack?.youtubeId, playbackState.isPlaying, queue.length, smartQueueItems, userId, setQueue, addToQueue]);
 
   const handleSeekCommit = (value: number) => {
@@ -1470,6 +1505,7 @@ export default function RoomPage() {
       if (Math.abs(deltaX) < 140) return;
       if (deltaX < 0 && currentIndex < tabOrder.length - 1) setMobileTab(tabOrder[currentIndex + 1]);
       if (deltaX > 0 && currentIndex > 0) setMobileTab(tabOrder[currentIndex - 1]);
+      setSwipePreviewX(0);
     };
 
     return (
@@ -1481,8 +1517,22 @@ export default function RoomPage() {
 
         <div
           className="relative z-[1] px-4 pt-4 space-y-3"
-          onTouchStart={(e) => { touchStartXRef.current = e.changedTouches[0].clientX; }}
-          onTouchEnd={(e) => onSwipeEnd(e.changedTouches[0].clientX)}
+          onTouchStart={(e) => {
+            touchStartXRef.current = e.changedTouches[0].clientX;
+            setSwipePreviewX(0);
+          }}
+          onTouchMove={(e) => {
+            if (touchStartXRef.current === null) return;
+            const deltaX = e.changedTouches[0].clientX - touchStartXRef.current;
+            const atLeftEdge = currentIndex === 0 && deltaX > 0;
+            const atRightEdge = currentIndex === tabOrder.length - 1 && deltaX < 0;
+            const resisted = (atLeftEdge || atRightEdge) ? deltaX * 0.35 : deltaX * 0.18;
+            setSwipePreviewX(Math.max(-48, Math.min(48, resisted)));
+          }}
+          onTouchEnd={(e) => {
+            onSwipeEnd(e.changedTouches[0].clientX);
+            setSwipePreviewX(0);
+          }}
         >
           <div className="flex items-center gap-2">
             <button onClick={() => router.push('/browse')} className="h-11 w-11 rounded-2xl apple-glass flex items-center justify-center text-t2 shrink-0">
@@ -1530,6 +1580,7 @@ export default function RoomPage() {
             </div>
           </div>
 
+          <div style={{ transform: `translate3d(${swipePreviewX}px, 0, 0)`, transition: swipePreviewX === 0 ? 'transform 160ms ease-out' : 'none' }}>
           <AnimatePresence mode="wait">
             {mobileTab === 'room' && (
               <motion.div key="room" initial={{ opacity: 0, x: -12 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: 12 }} className="apple-glass rounded-2xl h-[68vh] overflow-hidden flex flex-col">
@@ -1686,6 +1737,7 @@ export default function RoomPage() {
               </motion.div>
             )}
           </AnimatePresence>
+          </div>
         </div>
         <AnimatePresence>
           {isOffline && (
@@ -1756,6 +1808,13 @@ export default function RoomPage() {
                   <button onClick={() => setDesktopLeftOpen(false)} className="text-xs px-2 py-1 rounded-lg bg-elevated text-t2">Close</button>
                 </div>
                 <div className="flex-1 min-h-0 overflow-hidden">
+                  {desktopLeftTab === 'home' && (
+                    <RoomHomePanel
+                      onAddToQueue={addToQueueFromSearch}
+                      language={homeLanguage}
+                      onLanguageChange={setHomeLanguage}
+                    />
+                  )}
                   {desktopLeftTab === 'queue' && (
                     <div className="h-full flex flex-col">
                       <div className="flex-1 min-h-0 border-b border-[var(--border)]">
@@ -1874,6 +1933,12 @@ export default function RoomPage() {
         <div className="mt-4">
           <div className="apple-glass glow-accent rounded-[26px] px-3 py-2 flex items-center justify-center gap-3 max-w-[720px] mx-auto">
             <button
+              onClick={() => { setDesktopLeftOpen(true); setDesktopLeftTab('home'); setDesktopDockActive('home'); }}
+              className={`h-11 px-4 rounded-2xl text-sm ${desktopDockActive === 'home' ? 'bg-accent text-bg' : 'text-t2 bg-white/[0.04]'}`}
+            >
+              Home
+            </button>
+            <button
               onClick={() => { setDesktopLeftOpen(true); setDesktopLeftTab('search'); setDesktopDockActive('search'); }}
               className={`h-11 px-4 rounded-2xl text-sm ${desktopDockActive === 'search' ? 'bg-accent text-bg' : 'text-t2 bg-white/[0.04]'}`}
             >
@@ -1922,6 +1987,7 @@ export default function RoomPage() {
             >
               <p><span className="text-t1">Q</span> Queue drawer</p>
               <p><span className="text-t1">C</span> Chat drawer</p>
+              <p><span className="text-t1">H</span> Home drawer</p>
               <p><span className="text-t1">Space</span> Play/Pause</p>
               <p><span className="text-t1">←/→</span> Seek 5s</p>
               <p><span className="text-t1">N / P</span> Next / Previous</p>

@@ -26,6 +26,7 @@ export default function Chat({ onSendMessage }: ChatProps) {
   const [showJump, setShowJump] = useState(false);
   const [pendingCount, setPendingCount] = useState(0);
   const [unreadStartIndex, setUnreadStartIndex] = useState<number | null>(null);
+  const [scrollTop, setScrollTop] = useState(0);
   const bottomRef = useRef<HTMLDivElement>(null);
   const listRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
@@ -63,6 +64,15 @@ export default function Chat({ onSendMessage }: ChatProps) {
     setUnreadStartIndex(null);
   };
 
+  const rowHeight = 74;
+  const viewportHeight = 520;
+  const overscan = 5;
+  const startIndex = Math.max(0, Math.floor(scrollTop / rowHeight) - overscan);
+  const endIndex = Math.min(messages.length, Math.ceil((scrollTop + viewportHeight) / rowHeight) + overscan);
+  const visibleMessages = messages.slice(startIndex, endIndex);
+  const topPad = startIndex * rowHeight;
+  const bottomPad = Math.max(0, (messages.length - endIndex) * rowHeight);
+
   const handleSend = (e: React.FormEvent) => {
     e.preventDefault();
     const trimmed = input.trim();
@@ -77,7 +87,8 @@ export default function Chat({ onSendMessage }: ChatProps) {
       <div
         ref={listRef}
         className="flex-1 min-h-0 overflow-y-auto px-3 py-2 space-y-2"
-        onScroll={() => {
+        onScroll={(e) => {
+          setScrollTop((e.target as HTMLDivElement).scrollTop);
           if (isNearBottom()) {
             setShowJump(false);
             setPendingCount(0);
@@ -85,8 +96,10 @@ export default function Chat({ onSendMessage }: ChatProps) {
           }
         }}
       >
+        <div style={{ height: topPad }} />
         <AnimatePresence initial={false}>
-          {messages.map((msg, i) => {
+          {visibleMessages.map((msg, offset) => {
+            const i = startIndex + offset;
             const isOwn = msg.userId === userId;
             const color = getInitialColor(msg.username);
             return (
@@ -136,6 +149,7 @@ export default function Chat({ onSendMessage }: ChatProps) {
             );
           })}
         </AnimatePresence>
+        <div style={{ height: bottomPad }} />
         <div ref={bottomRef} />
       </div>
 
