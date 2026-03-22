@@ -574,67 +574,69 @@ function RoomHomePanel({
     let mounted = true;
     const flavor = refreshTick % 6;
     const facets = ['latest official songs', 'new music releases', 'top movie songs', 'official lyrical songs', 'audio jukebox', 'best hits'];
-    const queries = [
+    const primaryQueries = [
       `${language} ${facets[flavor]}`,
       `${language} official songs`,
       `${language} music label hits`,
       `${language} album songs`,
     ];
 
-    setLoading(true);
-    Promise.all(queries.map((q) => api.get(`/api/music/search?q=${encodeURIComponent(q)}`).then((r) => r.data).catch(() => [])))
-      .then(async (lists) => {
-        if (!mounted) return;
-        const merged = lists.flat() as Suggestion[];
-        const seenLocal = new Set<string>();
-        let deduped = merged.filter((x) => {
-          const key = canonicalSongKey(x.title || '', x.artist || '');
-          if (!x?.id || !isLikelyMusicResult(x) || seenLocal.has(key) || shownKeysRef.current.has(key)) return false;
-          seenLocal.add(key);
-          return true;
-        });
+    const fallbackSeeds: Record<HomeLanguage, string[]> = {
+      english: ['vevo official audio', 'warner records official songs', 'universal music official songs'],
+      telugu: ['aditya music telugu songs', 'lahari music telugu', 'saregama telugu official songs'],
+      hindi: ['t-series official songs', 'zee music official songs', 'saregama hindi official songs'],
+      tamil: ['sony music south tamil songs', 'think music india tamil', 'saregama tamil official songs'],
+      punjabi: ['speed records official songs', 'tips punjabi songs', 'white hill music official songs'],
+      malayalam: ['muzik247 malayalam songs', 'satyam audios official songs', 'manorama music malayalam'],
+    };
 
+    const getRows = async (queries: string[]) => {
+      const lists = await Promise.all(
+        queries.map((q) => api.get(`/api/music/search?q=${encodeURIComponent(q)}`).then((r) => r.data).catch(() => []))
+      );
+      return lists.flat() as Suggestion[];
+    };
+
+    const dedupe = (rows: Suggestion[], strictMusic: boolean, allowOldPool: boolean) => {
+      const seen = new Set<string>();
+      if (!allowOldPool) shownKeysRef.current.clear();
+      return rows.filter((x) => {
+        const key = canonicalSongKey(x.title || '', x.artist || '');
+        if (!x?.id || seen.has(key)) return false;
+        if (!allowOldPool && shownKeysRef.current.has(key)) return false;
+        if (strictMusic && !isLikelyMusicResult(x)) return false;
+        seen.add(key);
+        return true;
+      });
+    };
+
+    setLoading(true);
+    (async () => {
+      try {
+        const merged = await getRows(primaryQueries);
+        let deduped = dedupe(merged, true, false);
         if (deduped.length < (compact ? 8 : 15)) {
-          // If we run out of fresh cards, allow older pool again.
-          shownKeysRef.current.clear();
-          deduped = merged.filter((x) => {
-            const key = canonicalSongKey(x.title || '', x.artist || '');
-            if (!x?.id || !isLikelyMusicResult(x) || seenLocal.has(key)) return false;
-            seenLocal.add(key);
-            return true;
-          });
+          deduped = dedupe(merged, true, true);
         }
 
         if (deduped.length === 0) {
-          // Hard fallback to known music-label seeds so home never appears empty.
-          const fallbackSeeds: Record<HomeLanguage, string[]> = {
-            english: ['vevo official audio', 'warner records official songs', 'universal music official songs'],
-            telugu: ['aditya music telugu songs', 'lahari music telugu', 'saregama telugu official songs'],
-            hindi: ['t-series official songs', 'zee music official songs', 'saregama hindi official songs'],
-            tamil: ['sony music south tamil songs', 'think music india tamil', 'saregama tamil official songs'],
-            punjabi: ['speed records official songs', 'tips punjabi songs', 'white hill music official songs'],
-            malayalam: ['muzik247 malayalam songs', 'satyam audios official songs', 'manorama music malayalam'],
-          };
-          const fallbackQueries = fallbackSeeds[language].slice(0, compact ? 2 : 3);
-          const fallbackLists = await Promise.all(
-            fallbackQueries.map((q) => api.get(`/api/music/search?q=${encodeURIComponent(q)}`).then((r) => r.data).catch(() => []))
-          );
-          const fallbackMerged = fallbackLists.flat() as Suggestion[];
-          deduped = fallbackMerged.filter((x) => {
-            const key = canonicalSongKey(x.title || '', x.artist || '');
-            if (!x?.id || seenLocal.has(key)) return false;
-            seenLocal.add(key);
-            return true;
-          });
+          const fallbackMerged = await getRows(fallbackSeeds[language].slice(0, compact ? 2 : 3));
+          deduped = dedupe(fallbackMerged, false, true);
         }
 
+        if (deduped.length === 0) {
+          const lastResort = await getRows([`${language} songs`, `${language} official music`]);
+          deduped = dedupe(lastResort, false, true);
+        }
+
+        if (!mounted) return;
         const next = deduped.slice(0, compact ? 8 : 15);
         next.forEach((x) => shownKeysRef.current.add(canonicalSongKey(x.title || '', x.artist || '')));
         setItems(next);
-      })
-      .finally(() => {
+      } finally {
         if (mounted) setLoading(false);
-      });
+      }
+    })();
 
     return () => { mounted = false; };
   }, [language, compact, refreshTick]);
@@ -665,6 +667,12 @@ function RoomHomePanel({
           </button>
         ))}
       </div>
+      {items.length === 0 ? (
+        <div className="px-1 py-6 text-center text-sm text-t3">
+          <p>No recommendations yet.</p>
+          <button onClick={() => setRefreshTick((v) => v + 1)} className="mt-2 text-xs px-3 py-1.5 rounded-lg bg-elevated text-t2">Retry</button>
+        </div>
+      ) : (
       <div className={`grid ${compact ? 'grid-cols-2' : 'grid-cols-3'} gap-2`}>
         {items.map((item) => (
           <button
@@ -689,6 +697,7 @@ function RoomHomePanel({
           </button>
         ))}
       </div>
+      )}
     </div>
   );
 }
@@ -805,6 +814,12 @@ export default function RoomPage() {
   const [desktopSocialTab, setDesktopSocialTab] = useState<'chat' | 'people'>('chat');
   const [desktopLeftTab, setDesktopLeftTab] = useState<'queue' | 'search' | 'recommendations'>('queue');
   const [desktopSearchQuery, setDesktopSearchQuery] = useState('');
+  const [desktopLeftOpen, setDesktopLeftOpen] = useState(false);
+  const [desktopRightOpen, setDesktopRightOpen] = useState(false);
+  const [desktopLeftWidth, setDesktopLeftWidth] = useState(360);
+  const [desktopRightWidth, setDesktopRightWidth] = useState(360);
+  const [desktopDockActive, setDesktopDockActive] = useState<'search' | 'recommendations' | 'queue' | 'chat'>('queue');
+  const [showShortcutHelp, setShowShortcutHelp] = useState(false);
   const [unreadChatCount, setUnreadChatCount] = useState(0);
   const [homeLanguage, setHomeLanguage] = useState<HomeLanguage>('english');
   const [volume, setVolume] = useState(0.92);
@@ -930,6 +945,10 @@ export default function RoomPage() {
     if (savedDesktopLeft === 'queue' || savedDesktopLeft === 'search' || savedDesktopLeft === 'recommendations') setDesktopLeftTab(savedDesktopLeft);
     const savedSmartEnabled = window.localStorage.getItem('lito-smart-queue-enabled');
     if (savedSmartEnabled === '0' || savedSmartEnabled === '1') setSmartQueueEnabled(savedSmartEnabled === '1');
+    const savedLeftWidth = Number(window.localStorage.getItem('lito-pref-desktop-left-width') || '360');
+    const savedRightWidth = Number(window.localStorage.getItem('lito-pref-desktop-right-width') || '360');
+    if (!Number.isNaN(savedLeftWidth)) setDesktopLeftWidth(Math.max(300, Math.min(520, savedLeftWidth)));
+    if (!Number.isNaN(savedRightWidth)) setDesktopRightWidth(Math.max(300, Math.min(520, savedRightWidth)));
   }, []);
 
   useEffect(() => {
@@ -956,6 +975,16 @@ export default function RoomPage() {
     if (typeof window === 'undefined') return;
     window.localStorage.setItem('lito-pref-desktop-left', desktopLeftTab);
   }, [desktopLeftTab]);
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    window.localStorage.setItem('lito-pref-desktop-left-width', String(desktopLeftWidth));
+  }, [desktopLeftWidth]);
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    window.localStorage.setItem('lito-pref-desktop-right-width', String(desktopRightWidth));
+  }, [desktopRightWidth]);
 
   useEffect(() => {
     if (typeof window === 'undefined') return;
@@ -1038,6 +1067,28 @@ export default function RoomPage() {
     const onKey = (e: KeyboardEvent) => {
       const target = e.target as HTMLElement | null;
       if (target && (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable)) return;
+      const key = e.key.toLowerCase();
+
+      if (key === 'q') {
+        e.preventDefault();
+        setDesktopLeftOpen((v) => !v);
+        setDesktopDockActive('queue');
+        setDesktopLeftTab('queue');
+        return;
+      }
+      if (key === 'c') {
+        e.preventDefault();
+        setDesktopRightOpen((v) => !v);
+        setDesktopDockActive('chat');
+        setDesktopSocialTab('chat');
+        return;
+      }
+      if (key === '?') {
+        e.preventDefault();
+        setShowShortcutHelp((v) => !v);
+        return;
+      }
+
       if (!isHostOrDj) return;
 
       if (e.code === 'Space') {
@@ -1105,7 +1156,8 @@ export default function RoomPage() {
   useEffect(() => {
     if (!smartQueueEnabled || !isHostOrDj) return;
     if (!currentTrack || !playbackState.isPlaying) return;
-    if (queue.length > 0) {
+    // queue includes currently playing track at index 0. Auto-fill when only current is left.
+    if (queue.length > 1) {
       smartQueueAutoRef.current = '';
       return;
     }
@@ -1399,113 +1451,231 @@ export default function RoomPage() {
         <div className="mesh-blob w-[36rem] h-[36rem] top-1/3 -right-24" style={{ background: 'var(--accent-dim)' }} />
       </div>
 
-      <div className="relative z-[1] max-w-[1500px] mx-auto px-5 py-5">
-        <div className="apple-glass rounded-2xl px-4 py-3 mb-4 flex items-center justify-between">
+      <div className="relative z-[1] max-w-[1700px] mx-auto px-5 py-5 min-h-screen flex flex-col">
+        <div className="apple-glass rounded-2xl px-4 py-3 flex items-center justify-between">
           <div>
             <h1 className="font-display text-2xl">{roomName}</h1>
-            <p className="text-xs text-t3">Synchronized room playback</p>
+            <p className="text-xs text-t3">Minimal Glass Pro</p>
           </div>
-          <div className="flex items-center gap-2">
-            <div className="inline-flex items-center gap-2 text-xs text-t3 mr-1">
+          <div className="flex items-center gap-3">
+            <button
+              onClick={() => { setDesktopRightOpen(true); setDesktopSocialTab('people'); }}
+              className="flex -space-x-2 items-center"
+              title="Open listeners"
+            >
+              {participants.slice(0, 6).map((p) => (
+                <div key={p.userId} className="w-7 h-7 rounded-full border border-black flex items-center justify-center text-[10px] font-bold" style={{ background: avatarColor(p.username), color: '#000' }}>
+                  {p.username[0]?.toUpperCase()}
+                </div>
+              ))}
+            </button>
+            <div className="inline-flex items-center gap-2 text-xs text-t3">
               <span className={`inline-block w-2 h-2 rounded-full ${connectionState === 'synced' ? 'bg-emerald-400' : 'bg-amber-400 animate-pulse'}`} />
               {connectionState === 'synced' ? 'Synced' : 'Reconnecting'}
             </div>
             <InstallAppButton compact />
-            {isHost && <button onClick={toggleDjMode} className="px-3 py-1.5 rounded-lg bg-elevated text-t2">DJ Mode</button>}
+            {isHost && <button onClick={toggleDjMode} className="px-3 py-1.5 rounded-lg bg-elevated text-t2">DJ</button>}
             <button onClick={handleLeave} className="px-3 py-1.5 rounded-lg bg-elevated text-t2">Leave</button>
           </div>
         </div>
 
-        <div className="apple-glass rounded-2xl overflow-hidden mb-4">
-          <div className="px-4 py-3 border-b border-[var(--border)] flex items-center justify-between">
-            <div>
-              <p className="text-sm text-t2">Room Home</p>
-              <h2 className="text-xl font-display">Recommendations For This Room</h2>
-            </div>
-            <div className="flex -space-x-2 items-center">
-              {participants.slice(0, 8).map((p) => (
-                <div key={p.userId} className="w-8 h-8 rounded-full border border-black flex items-center justify-center text-[10px] font-bold" style={{ background: avatarColor(p.username), color: '#000' }}>
-                  {p.username[0]?.toUpperCase()}
+        <div className="relative flex-1 mt-4">
+          <AnimatePresence>
+            {desktopLeftOpen && (
+              <motion.div
+                initial={{ opacity: 0, x: -16 }}
+                animate={{ opacity: 1, x: 0 }}
+                exit={{ opacity: 0, x: -16 }}
+                className="absolute left-0 top-0 bottom-0 apple-glass rounded-2xl overflow-hidden z-20 flex flex-col"
+                style={{ width: desktopLeftWidth }}
+              >
+                <div className="px-3 py-2 border-b border-[var(--border)] flex items-center justify-between gap-2">
+                  <p className="text-xs uppercase tracking-wider text-t3">{desktopLeftTab}</p>
+                  <div className="flex items-center gap-2">
+                    <input
+                      type="range"
+                      min={300}
+                      max={520}
+                      step={10}
+                      value={desktopLeftWidth}
+                      onChange={(e) => setDesktopLeftWidth(Number(e.target.value))}
+                      className="w-20 accent-[var(--accent)]"
+                    />
+                    <button onClick={() => setDesktopLeftOpen(false)} className="text-xs px-2 py-1 rounded-lg bg-elevated text-t2">Close</button>
+                  </div>
                 </div>
-              ))}
-            </div>
-          </div>
-          <div className="h-[36vh]">
-            <RoomHomePanel onAddToQueue={addToQueueFromSearch} language={homeLanguage} onLanguageChange={setHomeLanguage} />
-          </div>
-        </div>
-
-        <div className="grid gap-4" style={{ gridTemplateColumns: '360px minmax(480px, 1fr) 360px' }}>
-          <div className="apple-glass rounded-2xl overflow-hidden min-h-[78vh] flex flex-col">
-            <div className="flex border-b border-[var(--border)]">
-              {(['queue', 'search', 'recommendations'] as const).map((tab) => (
-                <button key={tab} onClick={() => setDesktopLeftTab(tab)} className={`flex-1 py-2.5 text-xs uppercase tracking-wider ${desktopLeftTab === tab ? 'text-accent border-b-2 border-accent' : 'text-t3'}`}>
-                  {tab}
-                </button>
-              ))}
-            </div>
-            <div className="flex-1 min-h-0 overflow-hidden">
-              {desktopLeftTab === 'queue' && (
-                <Queue
-                  onAddToQueue={addToQueueFromSearch}
-                  onRemoveFromQueue={(id) => removeFromQueue(id)}
-                  onReorderQueue={reorderQueue}
-                  isHostOrDj={isHostOrDj}
-                  showSearch={false}
-                  onRequestSearch={() => setDesktopLeftTab('search')}
-                  smartQueueItems={smartQueueItems}
-                  smartQueueEnabled={smartQueueEnabled}
-                  smartQueueLoading={smartQueueLoading}
-                  onToggleSmartQueueEnabled={() => setSmartQueueEnabled((v) => !v)}
-                />
-              )}
-              {desktopLeftTab === 'search' && (
-                <SearchResultsPanel
-                  query={desktopSearchQuery}
-                  onQueryChange={setDesktopSearchQuery}
-                  onAddToQueue={addToQueueFromSearch}
-                  recentKey="lito-recent-searches-desktop"
-                />
-              )}
-              {desktopLeftTab === 'recommendations' && <RecommendationsPanel onAddToQueue={addToQueueFromSearch} />}
-            </div>
-          </div>
-
-          <div className="min-h-[78vh] apple-glass rounded-2xl p-4">
-            <PlayerCore
-              isHostOrDj={isHostOrDj}
-              seekValue={seekValue}
-              onSeekPreview={(v) => { setDraggingSeek(true); setSeekValue(v); }}
-              onSeekCommit={handleSeekCommit}
-              onPlay={onPlay}
-              onPause={onPause}
-              onSkipPrev={onSkipPrevAction}
-              onSkipNext={onSkipNextAction}
-              onShuffle={onShuffleAction}
-              onToggleLoop={onToggleLoopAction}
-              volume={volume}
-              onVolumeChange={setVolume}
-            />
-          </div>
-
-          <div className="apple-glass rounded-2xl overflow-hidden min-h-[78vh] flex flex-col">
-            <div className="flex border-b border-[var(--border)]">
-              {(['chat', 'people'] as const).map((tab) => (
-                <button key={tab} onClick={() => { setDesktopSocialTab(tab); if (tab === 'chat') setUnreadChatCount(0); }} className={`flex-1 py-2.5 text-xs uppercase tracking-wider ${desktopSocialTab === tab ? 'text-accent border-b-2 border-accent' : 'text-t3'}`}>
-                  {tab}
-                  {tab === 'chat' && unreadChatCount > 0 && (
-                    <span className="ml-2 inline-flex min-w-[16px] h-[16px] px-1 rounded-full bg-red-500 text-white text-[10px] leading-[16px] justify-center">
-                      {unreadChatCount > 9 ? '9+' : unreadChatCount}
-                    </span>
+                <div className="flex-1 min-h-0 overflow-hidden">
+                  {desktopLeftTab === 'queue' && (
+                    <Queue
+                      onAddToQueue={addToQueueFromSearch}
+                      onRemoveFromQueue={removeFromQueue}
+                      onReorderQueue={reorderQueue}
+                      isHostOrDj={isHostOrDj}
+                      showSearch={false}
+                      onRequestSearch={() => setDesktopLeftTab('search')}
+                      smartQueueItems={smartQueueItems}
+                      smartQueueEnabled={smartQueueEnabled}
+                      smartQueueLoading={smartQueueLoading}
+                      onToggleSmartQueueEnabled={() => setSmartQueueEnabled((v) => !v)}
+                    />
                   )}
-                </button>
-              ))}
-            </div>
-            <div className="flex-1 min-h-0 overflow-hidden">
-              {desktopSocialTab === 'chat' ? <Chat onSendMessage={sendChat} /> : <People />}
+                  {desktopLeftTab === 'search' && (
+                    <SearchResultsPanel
+                      query={desktopSearchQuery}
+                      onQueryChange={setDesktopSearchQuery}
+                      onAddToQueue={addToQueueFromSearch}
+                      recentKey="lito-recent-searches-desktop"
+                    />
+                  )}
+                  {desktopLeftTab === 'recommendations' && <RecommendationsPanel onAddToQueue={addToQueueFromSearch} />}
+                </div>
+              </motion.div>
+            )}
+          </AnimatePresence>
+
+          <AnimatePresence>
+            {desktopRightOpen && (
+              <motion.div
+                initial={{ opacity: 0, x: 16 }}
+                animate={{ opacity: 1, x: 0 }}
+                exit={{ opacity: 0, x: 16 }}
+                className="absolute right-0 top-0 bottom-0 apple-glass rounded-2xl overflow-hidden z-20 flex flex-col"
+                style={{ width: desktopRightWidth }}
+              >
+                <div className="px-3 py-2 border-b border-[var(--border)] flex items-center justify-between gap-2">
+                  <div className="flex items-center gap-2">
+                    {(['chat', 'people'] as const).map((tab) => (
+                      <button key={tab} onClick={() => { setDesktopSocialTab(tab); if (tab === 'chat') setUnreadChatCount(0); }} className={`text-xs px-2 py-1 rounded-lg ${desktopSocialTab === tab ? 'bg-accent text-bg' : 'bg-elevated text-t2'}`}>
+                        {tab}
+                      </button>
+                    ))}
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <input
+                      type="range"
+                      min={300}
+                      max={520}
+                      step={10}
+                      value={desktopRightWidth}
+                      onChange={(e) => setDesktopRightWidth(Number(e.target.value))}
+                      className="w-20 accent-[var(--accent)]"
+                    />
+                    <button onClick={() => setDesktopRightOpen(false)} className="text-xs px-2 py-1 rounded-lg bg-elevated text-t2">Close</button>
+                  </div>
+                </div>
+                <div className="flex-1 min-h-0 overflow-hidden">
+                  {desktopSocialTab === 'chat' ? <Chat onSendMessage={sendChat} /> : <People />}
+                </div>
+              </motion.div>
+            )}
+          </AnimatePresence>
+
+          <div
+            className="h-full transition-all duration-200 flex items-center justify-center"
+            style={{
+              paddingLeft: desktopLeftOpen ? desktopLeftWidth + 16 : 0,
+              paddingRight: desktopRightOpen ? desktopRightWidth + 16 : 0,
+            }}
+          >
+            <div className="apple-glass rounded-3xl p-5 w-full max-w-4xl">
+              <PlayerCore
+                isHostOrDj={isHostOrDj}
+                seekValue={seekValue}
+                onSeekPreview={(v) => { setDraggingSeek(true); setSeekValue(v); }}
+                onSeekCommit={handleSeekCommit}
+                onPlay={onPlay}
+                onPause={onPause}
+                onSkipPrev={onSkipPrevAction}
+                onSkipNext={onSkipNextAction}
+                onShuffle={onShuffleAction}
+                onToggleLoop={onToggleLoopAction}
+                volume={volume}
+                onVolumeChange={setVolume}
+              />
+              <div className="mt-4 border-t border-[var(--border)] pt-3">
+                <div className="flex items-center justify-between mb-2">
+                  <p className="text-[11px] uppercase tracking-wider text-t3">Smart Queue Preview</p>
+                  <button onClick={() => setSmartQueueEnabled((v) => !v)} className={`text-xs px-2 py-1 rounded-lg border ${smartQueueEnabled ? 'bg-accent text-bg border-accent' : 'bg-elevated text-t2 border-[var(--border)]'}`}>
+                    {smartQueueEnabled ? 'Auto ON' : 'Auto OFF'}
+                  </button>
+                </div>
+                <div className="flex gap-2 overflow-x-auto">
+                  {smartQueueItems.slice(0, 5).map((item) => (
+                    <button
+                      key={`smart-preview-${item.id}`}
+                      onClick={() => addToQueueFromSearch({ youtubeId: item.id, title: item.title, artist: item.artist, durationMs: item.durationMs, thumbnailUrl: item.thumbnailUrl, mode: 'end' })}
+                      className="min-w-[180px] text-left rounded-xl bg-elevated/70 border border-[var(--border)] p-2 hover:border-accent/60"
+                    >
+                      <p className="text-xs truncate">{item.title}</p>
+                      <p className="text-[11px] text-t3 truncate">{item.artist}</p>
+                    </button>
+                  ))}
+                  {smartQueueItems.length === 0 && (
+                    <div className="text-xs text-t3 px-2 py-1">No smart suggestions yet.</div>
+                  )}
+                </div>
+              </div>
             </div>
           </div>
         </div>
+
+        <div className="mt-4">
+          <div className="apple-glass glow-accent rounded-[26px] px-3 py-2 flex items-center justify-center gap-3 max-w-[720px] mx-auto">
+            <button
+              onClick={() => { setDesktopLeftOpen(true); setDesktopLeftTab('search'); setDesktopDockActive('search'); }}
+              className={`h-11 px-4 rounded-2xl text-sm ${desktopDockActive === 'search' ? 'bg-accent text-bg' : 'text-t2 bg-white/[0.04]'}`}
+            >
+              Search
+            </button>
+            <button
+              onClick={() => { setDesktopLeftOpen(true); setDesktopLeftTab('recommendations'); setDesktopDockActive('recommendations'); }}
+              className={`h-11 px-4 rounded-2xl text-sm ${desktopDockActive === 'recommendations' ? 'bg-accent text-bg' : 'text-t2 bg-white/[0.04]'}`}
+            >
+              Recommendations
+            </button>
+            <button
+              onClick={() => { setDesktopLeftOpen(true); setDesktopLeftTab('queue'); setDesktopDockActive('queue'); }}
+              className={`h-11 px-4 rounded-2xl text-sm ${desktopDockActive === 'queue' ? 'bg-accent text-bg' : 'text-t2 bg-white/[0.04]'}`}
+            >
+              Queue
+            </button>
+            <button
+              onClick={() => { setDesktopRightOpen(true); setDesktopSocialTab('chat'); setDesktopDockActive('chat'); setUnreadChatCount(0); }}
+              className={`relative h-11 px-4 rounded-2xl text-sm ${desktopDockActive === 'chat' ? 'bg-accent text-bg' : 'text-t2 bg-white/[0.04]'}`}
+            >
+              Chat
+              {unreadChatCount > 0 && (
+                <span className="absolute -top-1 -right-1 min-w-[18px] h-[18px] px-1 rounded-full bg-red-500 text-[10px] leading-[18px] text-white text-center">
+                  {unreadChatCount > 9 ? '9+' : unreadChatCount}
+                </span>
+              )}
+            </button>
+            <button
+              onClick={() => setShowShortcutHelp((v) => !v)}
+              className="h-11 w-11 rounded-2xl text-sm text-t2 bg-white/[0.04]"
+              title="Shortcuts"
+            >
+              ?
+            </button>
+          </div>
+        </div>
+
+        <AnimatePresence>
+          {showShortcutHelp && (
+            <motion.div
+              initial={{ opacity: 0, y: 6 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: 6 }}
+              className="absolute right-8 bottom-24 apple-glass rounded-xl p-3 text-xs text-t2 space-y-1"
+            >
+              <p><span className="text-t1">Q</span> Queue drawer</p>
+              <p><span className="text-t1">C</span> Chat drawer</p>
+              <p><span className="text-t1">Space</span> Play/Pause</p>
+              <p><span className="text-t1">←/→</span> Seek 5s</p>
+              <p><span className="text-t1">N / P</span> Next / Previous</p>
+            </motion.div>
+          )}
+        </AnimatePresence>
       </div>
     </div>
   );
