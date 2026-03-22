@@ -84,6 +84,7 @@ interface Store {
   setPlaybackState: (state: PlaybackState) => void;
   updateLocalPosition: (ms: number) => void;
   addMessage: (msg: Message) => void;
+  setMessages: (messages: Message[]) => void;
   setParticipants: (p: Participant[]) => void;
   setDjMode: (enabled: boolean) => void;
   markTrackUnplayable: (trackId: string) => void;
@@ -156,6 +157,8 @@ export const useStore = create<Store>()(
       updateLocalPosition: (localPositionMs) => set({ localPositionMs }),
       addMessage: (msg) =>
         set((s) => ({ messages: [...s.messages.slice(-499), msg] })),
+      setMessages: (messages) =>
+        set({ messages: messages.slice(-500) }),
       setParticipants: (participants) => set({ participants }),
       setDjMode: (djMode) => set({ djMode }),
       markTrackUnplayable: (trackId) =>

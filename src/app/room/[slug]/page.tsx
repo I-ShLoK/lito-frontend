@@ -128,6 +128,12 @@ function isSameSongVariant(candidate: { title: string; artist: string }, current
   return false;
 }
 
+function queueHasYoutubeId(queue: QueueItem[], youtubeId?: string | null): boolean {
+  if (!youtubeId) return false;
+  const target = youtubeId.toLowerCase();
+  return queue.some((item) => (item.youtubeId || '').toLowerCase() === target);
+}
+
 async function fetchPersonalizedRecommendations(
   currentTrack: { youtubeId: string; title: string; artist: string },
   queue: Array<{ youtubeId?: string; title: string; artist: string }>,
@@ -581,13 +587,28 @@ function RoomHomePanel({
   onLanguageChange: (language: HomeLanguage) => void;
   compact?: boolean;
 }) {
+  const { currentTrack, queue, roomId } = useStore();
   const [items, setItems] = useState<Suggestion[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshTick, setRefreshTick] = useState(0);
   const shownKeysRef = useRef<Set<string>>(new Set());
 
+  const roomArtists = useMemo(() => {
+    const counts = new Map<string, number>();
+    for (const item of queue) {
+      const artist = (item.artist || '').trim();
+      if (!artist) continue;
+      counts.set(artist, (counts.get(artist) || 0) + 1);
+    }
+    return Array.from(counts.entries())
+      .sort((a, b) => b[1] - a[1])
+      .slice(0, 4)
+      .map(([artist]) => artist);
+  }, [queue]);
+
   useEffect(() => {
     let mounted = true;
+    const limit = compact ? 8 : 15;
     const flavor = refreshTick % 6;
     const facets = ['latest official songs', 'new music releases', 'top movie songs', 'official lyrical songs', 'audio jukebox', 'best hits'];
     const primaryQueries = [
@@ -625,12 +646,40 @@ function RoomHomePanel({
       });
     };
 
+    const queueIds = new Set(
+      queue
+        .map((q) => (q.youtubeId || '').toLowerCase())
+        .filter((id) => !!id)
+    );
+
     setLoading(true);
     (async () => {
       try {
+        let personalizedSeed: Suggestion[] = [];
+        if (currentTrack?.youtubeId) {
+          const personalized = await fetchPersonalizedRecommendations(
+            { youtubeId: currentTrack.youtubeId, title: currentTrack.title, artist: currentTrack.artist },
+            queue.map((q) => ({ youtubeId: q.youtubeId, title: q.title, artist: q.artist })),
+            roomArtists,
+            limit + 6,
+            roomId || undefined
+          ).catch(() => []);
+
+          personalizedSeed = personalized
+            .filter((x) => !!x?.id && !queueIds.has(x.id.toLowerCase()))
+            .slice(0, limit);
+
+          if (!mounted) return;
+          if (personalizedSeed.length >= Math.min(6, limit)) {
+            personalizedSeed.forEach((x) => shownKeysRef.current.add(canonicalSongKey(x.title || '', x.artist || '')));
+            setItems(personalizedSeed);
+            return;
+          }
+        }
+
         const merged = await getRows(primaryQueries);
         let deduped = dedupe(merged, true, false);
-        if (deduped.length < (compact ? 8 : 15)) {
+        if (deduped.length < limit) {
           deduped = dedupe(merged, true, true);
         }
 
@@ -644,8 +693,17 @@ function RoomHomePanel({
           deduped = dedupe(lastResort, false, true);
         }
 
+        if (currentTrack) {
+          deduped = deduped.filter((x) => !isSameSongVariant({ title: x.title, artist: x.artist }, { title: currentTrack.title, artist: currentTrack.artist }));
+        }
+        deduped = deduped.filter((x) => !!x?.id && !queueIds.has(x.id.toLowerCase()));
+
         if (!mounted) return;
-        const next = deduped.slice(0, compact ? 8 : 15);
+        const mergedFinal = [...personalizedSeed, ...deduped].filter((x, idx, arr) => {
+          const key = canonicalSongKey(x.title || '', x.artist || '');
+          return arr.findIndex((y) => canonicalSongKey(y.title || '', y.artist || '') === key) === idx;
+        });
+        const next = mergedFinal.slice(0, limit);
         next.forEach((x) => shownKeysRef.current.add(canonicalSongKey(x.title || '', x.artist || '')));
         setItems(next);
       } finally {
@@ -654,7 +712,7 @@ function RoomHomePanel({
     })();
 
     return () => { mounted = false; };
-  }, [language, compact, refreshTick]);
+  }, [language, compact, refreshTick, currentTrack, queue, roomArtists, roomId]);
 
   if (loading) {
     return <div className="p-3 grid grid-cols-3 gap-2">{Array.from({ length: compact ? 6 : 9 }).map((_, i) => <div key={i} className="skeleton rounded-xl h-28" />)}</div>;
@@ -911,7 +969,7 @@ export default function RoomPage() {
     roomId, roomName, hostId, djMode,
     currentTrack, queue, playbackState, localPositionMs,
     setRoom, clearRoom, setCurrentTrack, setPlaybackState,
-    setQueue, setParticipants, setDjMode, addMessage, messages, participants,
+    setQueue, setParticipants, setDjMode, setMessages, messages, participants,
   } = useStore();
 
   const [loading, setLoading] = useState(true);
@@ -945,6 +1003,7 @@ export default function RoomPage() {
   const touchStartYRef = useRef<number | null>(null);
   const warnedLastTrackRef = useRef<string | null>(null);
   const prevMessageCountRef = useRef(0);
+  const chatInitializedRef = useRef(false);
   const smartQueueAutoRef = useRef('');
   const playedCanonRef = useRef<string[]>([]);
   const drawerResizeRef = useRef<'left' | 'right' | null>(null);
@@ -980,6 +1039,9 @@ export default function RoomPage() {
 
   useEffect(() => {
     if (!token) { router.replace('/'); return; }
+    chatInitializedRef.current = false;
+    prevMessageCountRef.current = 0;
+    setUnreadChatCount(0);
 
     (async () => {
       try {
@@ -1025,9 +1087,16 @@ export default function RoomPage() {
         }
 
         const msgRes = await api.get(`/api/rooms/${params.slug}/messages`);
-        msgRes.data.forEach((m: Record<string, unknown>) => {
-          addMessage({ userId: String(m.user_id), username: String(m.username), content: String(m.content), createdAt: String(m.created_at) });
-        });
+        const initialMessages = (Array.isArray(msgRes.data) ? msgRes.data : []).map((m: Record<string, unknown>) => ({
+          userId: String(m.user_id),
+          username: String(m.username),
+          content: String(m.content),
+          createdAt: String(m.created_at),
+        }));
+        setMessages(initialMessages);
+        prevMessageCountRef.current = initialMessages.length;
+        setUnreadChatCount(0);
+        chatInitializedRef.current = true;
 
         joinRoom(room.id);
         setLoading(false);
@@ -1284,6 +1353,11 @@ export default function RoomPage() {
   }, [isMobile, isHostOrDj, playbackState.isPlaying, localPositionMs, currentTrack?.durationMs, play, pause, seek, skipNext, skipPrev, triggerHaptic]);
 
   useEffect(() => {
+    if (!chatInitializedRef.current) {
+      prevMessageCountRef.current = messages.length;
+      return;
+    }
+
     const previous = prevMessageCountRef.current;
     const next = messages.length;
     if (next > previous) {
@@ -1352,6 +1426,10 @@ export default function RoomPage() {
       const fingerprint = `${currentTrack.youtubeId}:${next.id}`;
       if (smartQueueAutoRef.current === fingerprint) return;
       smartQueueAutoRef.current = fingerprint;
+
+      if (queueHasYoutubeId(useStore.getState().queue, next.id)) {
+        return;
+      }
 
       const optimistic: QueueItem = {
         id: `optimistic-smart-${Date.now()}-${Math.random().toString(16).slice(2, 8)}`,
@@ -1432,6 +1510,12 @@ export default function RoomPage() {
     toggleLoop();
   };
   const addToQueueFromSearch = useCallback((item: { youtubeId: string; title: string; artist: string; durationMs: number; thumbnailUrl: string; mode: 'next' | 'end' }) => {
+    const currentQueue = useStore.getState().queue;
+    if (queueHasYoutubeId(currentQueue, item.youtubeId)) {
+      toast('Song is already in queue', { duration: 2000 });
+      return;
+    }
+
     const optimistic: QueueItem = {
       id: `optimistic-${Date.now()}-${Math.random().toString(16).slice(2, 8)}`,
       position: queue.length,
@@ -1446,7 +1530,6 @@ export default function RoomPage() {
       durationMs: item.durationMs,
       thumbnailUrl: item.thumbnailUrl,
     };
-    const currentQueue = useStore.getState().queue;
     const nextQueue = [...currentQueue];
     if (item.mode === 'next') nextQueue.splice(Math.min(1, nextQueue.length), 0, optimistic);
     else nextQueue.push(optimistic);
