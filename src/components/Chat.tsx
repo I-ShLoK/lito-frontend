@@ -38,9 +38,9 @@ export default function Chat({ onSendMessage }: ChatProps) {
   };
 
   return (
-    <div className="flex flex-col h-full">
+    <div className="flex flex-col h-full min-h-0 overflow-hidden">
       {/* Messages */}
-      <div className="flex-1 overflow-y-auto px-3 py-2 space-y-2">
+      <div className="flex-1 min-h-0 overflow-y-auto px-3 py-2 space-y-2">
         <AnimatePresence initial={false}>
           {messages.map((msg, i) => {
             const isOwn = msg.userId === userId;
@@ -66,7 +66,7 @@ export default function Chat({ onSendMessage }: ChatProps) {
                     <span className="text-xs text-t3 px-1">{msg.username}</span>
                   )}
                   <div
-                    className={`px-3 py-1.5 rounded-2xl text-sm break-words ${
+                    className={`px-3 py-1.5 rounded-2xl text-sm break-words break-all ${
                       isOwn
                         ? 'bg-accent text-bg rounded-tr-sm'
                         : 'bg-elevated text-t1 rounded-tl-sm'

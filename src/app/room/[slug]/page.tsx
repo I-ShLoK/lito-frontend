@@ -41,6 +41,34 @@ interface Suggestion {
   thumbnailUrl: string;
 }
 
+function extractYouTubeId(input: string): string | null {
+  const text = input.trim();
+  const direct = text.match(/^[a-zA-Z0-9_-]{11}$/);
+  if (direct) return direct[0];
+  try {
+    const u = new URL(text);
+    if (u.hostname.includes('youtu.be')) {
+      const id = u.pathname.replace('/', '').trim();
+      return id.length === 11 ? id : null;
+    }
+    if (u.hostname.includes('youtube.com')) {
+      const v = u.searchParams.get('v');
+      if (v && v.length === 11) return v;
+      const parts = u.pathname.split('/');
+      const last = parts[parts.length - 1];
+      if (last && last.length === 11) return last;
+    }
+  } catch {
+    return null;
+  }
+  return null;
+}
+
+function isPlaylistLink(input: string): boolean {
+  const text = input.trim().toLowerCase();
+  return text.includes('list=') || text.includes('open.spotify.com/playlist');
+}
+
 function SearchResultsPanel({
   query,
   onQueryChange,
@@ -52,21 +80,45 @@ function SearchResultsPanel({
 }) {
   const [loading, setLoading] = useState(false);
   const [results, setResults] = useState<Suggestion[]>([]);
+  const [playlistMode, setPlaylistMode] = useState(false);
 
   useEffect(() => {
     const q = query.trim();
     if (!q) {
       setResults([]);
+      setPlaylistMode(false);
       return;
     }
 
     const t = setTimeout(async () => {
       setLoading(true);
       try {
-        const res = await api.get(`/api/music/search?q=${encodeURIComponent(q)}`);
-        setResults((res.data || []) as Suggestion[]);
+        if (isPlaylistLink(q)) {
+          const importRes = await api.post('/api/music/import-playlist', { url: q });
+          setPlaylistMode(true);
+          setResults((importRes.data || []) as Suggestion[]);
+          return;
+        }
+
+        const youtubeId = extractYouTubeId(q);
+        if (youtubeId) {
+          setPlaylistMode(false);
+          const infoRes = await api.get(`/api/audio/info/${youtubeId}`);
+          setResults([{
+            id: youtubeId,
+            title: String(infoRes.data?.title || 'YouTube Track'),
+            artist: String(infoRes.data?.artist || 'Unknown'),
+            durationMs: Number(infoRes.data?.durationMs || 0),
+            thumbnailUrl: String(infoRes.data?.thumbnailUrl || `https://i.ytimg.com/vi/${youtubeId}/hqdefault.jpg`),
+          }]);
+        } else {
+          setPlaylistMode(false);
+          const res = await api.get(`/api/music/search?q=${encodeURIComponent(q)}`);
+          setResults((res.data || []) as Suggestion[]);
+        }
       } catch {
         setResults([]);
+        setPlaylistMode(false);
       } finally {
         setLoading(false);
       }
@@ -111,6 +163,23 @@ function SearchResultsPanel({
         <div className="px-4 py-6 text-sm text-t3">Search from here to add songs to queue instantly.</div>
       ) : (
         <div className="overflow-y-auto h-full p-2 space-y-1">
+          {playlistMode && results.length > 0 && (
+            <button
+              onClick={() => {
+                results.forEach((r) => onAddToQueue({
+                  youtubeId: r.id,
+                  title: r.title,
+                  artist: r.artist,
+                  durationMs: r.durationMs,
+                  thumbnailUrl: r.thumbnailUrl,
+                  mode: 'end',
+                }));
+              }}
+              className="w-full mb-2 px-3 py-2 rounded-xl bg-accent text-bg text-sm font-medium"
+            >
+              Import Playlist ({results.length} songs)
+            </button>
+          )}
           {results.map((r) => (
             <div key={r.id} className="flex items-center gap-3 p-2 rounded-xl hover:bg-elevated group">
               <div className="w-11 h-11 rounded-lg overflow-hidden bg-elevated">
@@ -223,10 +292,13 @@ function RecommendationsPanel({
     )
       .then((lists) => {
         const merged = lists.flat() as Suggestion[];
-        const seen = new Set<string>();
+        const seenIds = new Set<string>();
+        const seenNames = new Set<string>();
         const out = merged.filter((r) => {
-          if (!r?.id || seen.has(r.id) || r.id === currentTrack.youtubeId) return false;
-          seen.add(r.id);
+          const nameKey = `${(r?.title || '').trim().toLowerCase()}::${(r?.artist || '').trim().toLowerCase()}`;
+          if (!r?.id || seenIds.has(r.id) || r.id === currentTrack.youtubeId || seenNames.has(nameKey)) return false;
+          seenIds.add(r.id);
+          seenNames.add(nameKey);
           return true;
         });
         setResults(out.slice(0, 12));
@@ -269,6 +341,7 @@ function PlayerCore({
   onPause,
   onSkipPrev,
   onSkipNext,
+  onShuffle,
   onToggleLoop,
 }: {
   isHostOrDj: boolean;
@@ -279,6 +352,7 @@ function PlayerCore({
   onPause: () => void;
   onSkipPrev: () => void;
   onSkipNext: () => void;
+  onShuffle: () => void;
   onToggleLoop: () => void;
 }) {
   const { currentTrack, playbackState } = useStore();
@@ -317,13 +391,14 @@ function PlayerCore({
         <div className="flex justify-center mb-3"><Visualizer isPlaying={playbackState.isPlaying} bars={28} /></div>
 
         <div className="flex items-center justify-center gap-6">
+          <button onClick={onShuffle} disabled={!isHostOrDj} className="p-2 text-t3 disabled:opacity-30">↺</button>
           <button onClick={onToggleLoop} className={`p-2 rounded-lg ${playbackState.isLooping ? 'text-accent' : 'text-t3'}`}>↻</button>
           <button onClick={onSkipPrev} disabled={!isHostOrDj} className="p-2 text-t2 disabled:opacity-30">⏮</button>
           <button onClick={playbackState.isPlaying ? onPause : onPlay} disabled={!isHostOrDj} className="w-14 h-14 rounded-full bg-accent text-bg text-2xl disabled:opacity-30">
             {playbackState.isPlaying ? '❚❚' : '▶'}
           </button>
           <button onClick={onSkipNext} disabled={!isHostOrDj} className="p-2 text-t2 disabled:opacity-30">⏭</button>
-          <div className="w-6" />
+          <div className="w-1" />
         </div>
       </div>
   );
@@ -339,7 +414,7 @@ export default function RoomPage() {
     roomId, roomName, hostId, djMode,
     currentTrack, queue, playbackState, localPositionMs,
     setRoom, clearRoom, setCurrentTrack, setPlaybackState,
-    setQueue, setParticipants, setDjMode, addMessage,
+    setQueue, setParticipants, setDjMode, addMessage, messages,
   } = useStore();
 
   const [loading, setLoading] = useState(true);
@@ -351,16 +426,18 @@ export default function RoomPage() {
   const [desktopSocialTab, setDesktopSocialTab] = useState<'chat' | 'people'>('chat');
   const [desktopLeftTab, setDesktopLeftTab] = useState<'queue' | 'search' | 'recommendations'>('queue');
   const [desktopSearchQuery, setDesktopSearchQuery] = useState('');
+  const [unreadChatCount, setUnreadChatCount] = useState(0);
 
   const touchStartXRef = useRef<number | null>(null);
   const warnedLastTrackRef = useRef<string | null>(null);
+  const prevMessageCountRef = useRef(0);
   const isHost = userId === hostId;
   const isHostOrDj = isHost || djMode;
 
   const {
     timeOffsetRef, joinRoom, leaveRoom,
     play, pause, seek, skipNext, skipPrev,
-    toggleLoop, sendChat, toggleDjMode, trackEnded, syncRequest,
+    shuffleQueue, toggleLoop, sendChat, toggleDjMode, trackEnded, syncRequest,
     addToQueue, removeFromQueue, reorderQueue,
   } = useSocket();
 
@@ -488,6 +565,19 @@ export default function RoomPage() {
     window.localStorage.setItem(promptKey, String(Date.now()));
   }, [isMobile]);
 
+  useEffect(() => {
+    const previous = prevMessageCountRef.current;
+    const next = messages.length;
+    if (next > previous) {
+      const desktopUnread = !isMobile && desktopSocialTab !== 'chat';
+      const mobileUnread = isMobile && mobileTab !== 'chat';
+      if (desktopUnread || mobileUnread) {
+        setUnreadChatCount((v) => v + (next - previous));
+      }
+    }
+    prevMessageCountRef.current = next;
+  }, [messages.length, isMobile, desktopSocialTab, mobileTab]);
+
   const handleSeekCommit = (value: number) => {
     setDraggingSeek(false);
     if (isHostOrDj) seek(value);
@@ -544,11 +634,19 @@ export default function RoomPage() {
             ] as const).map((tab) => (
               <button
                 key={tab.id}
-                onClick={() => setMobileTab(tab.id)}
+                onClick={() => {
+                  setMobileTab(tab.id);
+                  if (tab.id === 'chat') setUnreadChatCount(0);
+                }}
                 aria-label={tab.label}
-                className={`h-11 rounded-2xl flex items-center justify-center transition-all ${mobileTab === tab.id ? 'bg-accent text-bg shadow-[0_10px_30px_rgba(255,255,255,0.22)]' : 'text-t2 bg-white/[0.04]'}`}
+                className={`relative h-11 rounded-2xl flex items-center justify-center transition-all ${mobileTab === tab.id ? 'bg-accent text-bg shadow-[0_10px_30px_rgba(255,255,255,0.22)]' : 'text-t2 bg-white/[0.04]'}`}
               >
                 {tab.icon}
+                {tab.id === 'chat' && unreadChatCount > 0 && (
+                  <span className="absolute -top-1 -right-1 min-w-[18px] h-[18px] px-1 rounded-full bg-red-500 text-[10px] leading-[18px] text-white text-center">
+                    {unreadChatCount > 9 ? '9+' : unreadChatCount}
+                  </span>
+                )}
               </button>
             ))}
             </div>
@@ -584,6 +682,7 @@ export default function RoomPage() {
                     onPause={onPause}
                     onSkipPrev={skipPrev}
                     onSkipNext={skipNext}
+                    onShuffle={shuffleQueue}
                     onToggleLoop={toggleLoop}
                   />
                 </div>
@@ -683,6 +782,7 @@ export default function RoomPage() {
               onPause={onPause}
               onSkipPrev={skipPrev}
               onSkipNext={skipNext}
+              onShuffle={shuffleQueue}
               onToggleLoop={toggleLoop}
             />
           </div>
@@ -690,8 +790,13 @@ export default function RoomPage() {
           <div className="apple-glass rounded-2xl overflow-hidden min-h-[78vh] flex flex-col">
             <div className="flex border-b border-[var(--border)]">
               {(['chat', 'people'] as const).map((tab) => (
-                <button key={tab} onClick={() => setDesktopSocialTab(tab)} className={`flex-1 py-2.5 text-xs uppercase tracking-wider ${desktopSocialTab === tab ? 'text-accent border-b-2 border-accent' : 'text-t3'}`}>
+                <button key={tab} onClick={() => { setDesktopSocialTab(tab); if (tab === 'chat') setUnreadChatCount(0); }} className={`flex-1 py-2.5 text-xs uppercase tracking-wider ${desktopSocialTab === tab ? 'text-accent border-b-2 border-accent' : 'text-t3'}`}>
                   {tab}
+                  {tab === 'chat' && unreadChatCount > 0 && (
+                    <span className="ml-2 inline-flex min-w-[16px] h-[16px] px-1 rounded-full bg-red-500 text-white text-[10px] leading-[16px] justify-center">
+                      {unreadChatCount > 9 ? '9+' : unreadChatCount}
+                    </span>
+                  )}
                 </button>
               ))}
             </div>

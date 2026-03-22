@@ -250,6 +250,7 @@ export function useSocket() {
   const seek = useCallback((positionMs: number) => emit('SEEK', { positionMs }), [emit]);
   const skipNext = useCallback(() => emit('SKIP_NEXT'), [emit]);
   const skipPrev = useCallback(() => emit('SKIP_PREV'), [emit]);
+  const shuffleQueue = useCallback(() => emit('SHUFFLE_QUEUE'), [emit]);
   const toggleLoop = useCallback(() => emit('TOGGLE_LOOP'), [emit]);
   const sendChat = useCallback((message: string) => emit('CHAT', { message }), [emit]);
   const toggleDjMode = useCallback(() => emit('TOGGLE_DJ_MODE'), [emit]);
@@ -274,7 +275,7 @@ export function useSocket() {
     socket: socketRef.current,
     timeOffsetRef,
     joinRoom, leaveRoom, play, pause, seek,
-    skipNext, skipPrev, toggleLoop, sendChat,
+    skipNext, skipPrev, shuffleQueue, toggleLoop, sendChat,
     toggleDjMode, trackEnded, syncRequest,
     addToQueue, removeFromQueue, reorderQueue,
     emit,
