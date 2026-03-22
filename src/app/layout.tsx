@@ -26,10 +26,13 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
           position="bottom-right"
           toastOptions={{
             style: {
-              background: 'var(--surface)',
+              background: 'linear-gradient(140deg, rgba(255,255,255,0.14) 0%, rgba(255,255,255,0.05) 38%, rgba(255,255,255,0.02) 100%), color-mix(in srgb, var(--surface) 66%, transparent)',
               color: 'var(--text-1)',
-              border: '1px solid var(--border)',
+              border: '1px solid color-mix(in srgb, #ffffff 24%, var(--border))',
               borderRadius: 'var(--radius)',
+              backdropFilter: 'blur(28px) saturate(150%)',
+              WebkitBackdropFilter: 'blur(28px) saturate(150%)',
+              boxShadow: '0 24px 45px rgba(0,0,0,0.5), inset 0 1px 0 rgba(255,255,255,0.28), 0 0 0 1px rgba(255,255,255,0.06)',
               fontFamily: 'Satoshi, system-ui, sans-serif',
               fontSize: '14px',
             },

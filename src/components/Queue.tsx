@@ -226,16 +226,6 @@ export default function Queue({ onAddToQueue, onRemoveFromQueue, onReorderQueue,
                     <p className="text-xs text-t3 truncate">{item.artist}</p>
                   </div>
                   <span className="text-xs text-t3 flex-shrink-0 font-mono">{formatDuration(Number(item.durationMs || 0))}</span>
-                  {isHostOrDj && onReorderQueue && (
-                    <div className="flex sm:hidden flex-col gap-0.5">
-                      <button onClick={() => onReorderQueue(item.id, Math.max(0, i - 1))} className="text-[10px] text-t3 px-1">
-                        Up
-                      </button>
-                      <button onClick={() => onReorderQueue(item.id, Math.min(queue.length - 1, i + 1))} className="text-[10px] text-t3 px-1">
-                        Dn
-                      </button>
-                    </div>
-                  )}
                   {canRemove && (
                     <button onClick={() => onRemoveFromQueue(item.id)} className="opacity-0 group-hover:opacity-100 text-t3 hover:text-t1 transition-opacity text-sm leading-none">
                       x

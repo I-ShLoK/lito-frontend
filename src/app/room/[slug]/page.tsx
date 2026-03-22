@@ -337,7 +337,7 @@ export default function RoomPage() {
   const {
     token, userId,
     roomId, roomName, hostId, djMode,
-    currentTrack, localPositionMs,
+    currentTrack, queue, playbackState, localPositionMs,
     setRoom, clearRoom, setCurrentTrack, setPlaybackState,
     setQueue, setParticipants, setDjMode, addMessage,
   } = useStore();
@@ -352,6 +352,7 @@ export default function RoomPage() {
   const [desktopLeftTab, setDesktopLeftTab] = useState<'queue' | 'recommendations'>('queue');
 
   const touchStartXRef = useRef<number | null>(null);
+  const warnedLastTrackRef = useRef<string | null>(null);
   const isHost = userId === hostId;
   const isHostOrDj = isHost || djMode;
 
@@ -431,6 +432,45 @@ export default function RoomPage() {
     if (!draggingSeek) setSeekValue(localPositionMs);
   }, [localPositionMs, draggingSeek]);
 
+  useEffect(() => {
+    const currentId = currentTrack?.youtubeId;
+    if (!currentId || !playbackState.isPlaying) return;
+
+    const isLastSong = queue.length <= 1;
+    if (isLastSong && warnedLastTrackRef.current !== currentId) {
+      toast('Last song is playing. Queue will be empty next.', { icon: '⚠', duration: 4000 });
+      warnedLastTrackRef.current = currentId;
+    }
+
+    if (!isLastSong) {
+      warnedLastTrackRef.current = null;
+    }
+  }, [currentTrack?.youtubeId, playbackState.isPlaying, queue.length]);
+
+  useEffect(() => {
+    if (!isMobile || typeof window === 'undefined') return;
+
+    const isStandalone =
+      window.matchMedia('(display-mode: standalone)').matches ||
+      (window.navigator as Navigator & { standalone?: boolean }).standalone === true;
+    if (isStandalone) return;
+
+    const promptKey = 'lito-install-nudge-ts';
+    const lastPromptAt = Number(window.localStorage.getItem(promptKey) || '0');
+    const cooldownMs = 12 * 60 * 60 * 1000;
+    if (Date.now() - lastPromptAt < cooldownMs) return;
+
+    const ua = window.navigator.userAgent.toLowerCase();
+    const isIOS = /iphone|ipad|ipod/.test(ua);
+    if (isIOS) {
+      toast('Install LiTo as an app: open Share and tap "Add to Home Screen".', { duration: 7000 });
+    } else {
+      toast('Install LiTo as an app for better performance. Use the Install App button.', { duration: 5500 });
+    }
+
+    window.localStorage.setItem(promptKey, String(Date.now()));
+  }, [isMobile]);
+
   const handleSeekCommit = (value: number) => {
     setDraggingSeek(false);
     if (isHostOrDj) seek(value);
@@ -444,6 +484,10 @@ export default function RoomPage() {
 
   const onPlay = () => play(localPositionMs);
   const onPause = () => pause(localPositionMs);
+  const addToQueueFromSearch = (item: { youtubeId: string; title: string; artist: string; durationMs: number; thumbnailUrl: string; mode: 'next' | 'end' }) => {
+    addToQueue(item);
+    toast.success(`Added to queue: ${item.title}`, { duration: 2200 });
+  };
 
   if (loading) return <div className="min-h-screen grid place-items-center"><div className="w-10 h-10 rounded-full border-2 border-accent border-t-transparent animate-spin" /></div>;
 
@@ -532,7 +576,7 @@ export default function RoomPage() {
                     <SearchResultsPanel
                       query={mobileSearchQuery}
                       onQueryChange={setMobileSearchQuery}
-                      onAddToQueue={addToQueue}
+                      onAddToQueue={addToQueueFromSearch}
                     />
                   )}
                   {mobilePlayerPanel === 'recommendations' && <RecommendationsPanel onAddToQueue={addToQueue} />}
