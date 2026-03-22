@@ -51,6 +51,20 @@ function avatarColor(seed: string): string {
   return colors[Math.abs(hash) % colors.length];
 }
 
+function canonicalSongKey(title: string, artist?: string): string {
+  const strip = (s: string) => s
+    .toLowerCase()
+    .replace(/\[[^\]]*\]|\([^)]+\)/g, ' ')
+    .replace(/\b(official|video|lyric|lyrics|audio|full song|reaction|teaser|trailer|4k|hd|visualizer|remaster(ed)?|version|shorts?|feat|ft)\b/g, ' ')
+    .replace(/[^a-z0-9\u0900-\u0d7f]+/gi, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+  const t = strip(title || '');
+  const a = strip(artist || '');
+  // Deduplicate across different channels uploading the same song.
+  return `${t.slice(0, 80)}::${a.split(' ')[0] || ''}`;
+}
+
 function extractYouTubeId(input: string): string | null {
   const text = input.trim();
   const direct = text.match(/^[a-zA-Z0-9_-]{11}$/);
@@ -288,11 +302,13 @@ function RecommendationsPanel({
     lastKeyRef.current = key;
 
     const cleanTitle = currentTrack.title.split('|')[0].trim();
+    const mainArtist = (currentTrack.artist || '').split(',')[0].trim();
     const langHint = detectLanguageHint(`${currentTrack.artist} ${cleanTitle}`);
 
     const queries = [
-      `${currentTrack.artist} ${cleanTitle} similar songs ${langHint}`,
-      `${cleanTitle} ${langHint} mix`,
+      `${mainArtist} ${cleanTitle} similar songs ${langHint}`,
+      `${cleanTitle} ${langHint} album songs`,
+      `${mainArtist} best songs ${langHint}`,
       ...roomArtists.map((a) => `${a} ${langHint} hits`),
     ].slice(0, 4);
 
@@ -303,12 +319,13 @@ function RecommendationsPanel({
       .then((lists) => {
         const merged = lists.flat() as Suggestion[];
         const seenIds = new Set<string>();
-        const seenNames = new Set<string>();
+        const seenCanon = new Set<string>();
         const out = merged.filter((r) => {
-          const nameKey = `${(r?.title || '').trim().toLowerCase()}::${(r?.artist || '').trim().toLowerCase()}`;
-          if (!r?.id || seenIds.has(r.id) || r.id === currentTrack.youtubeId || seenNames.has(nameKey)) return false;
+          const key = canonicalSongKey(r?.title || '', r?.artist || '');
+          const noisy = /reaction|review|status|shorts?/i.test(`${r?.title || ''} ${r?.artist || ''}`);
+          if (!r?.id || seenIds.has(r.id) || r.id === currentTrack.youtubeId || seenCanon.has(key) || noisy) return false;
           seenIds.add(r.id);
-          seenNames.add(nameKey);
+          seenCanon.add(key);
           return true;
         });
         setResults(out.slice(0, 12));
@@ -355,14 +372,17 @@ function RoomHomePanel({
 }) {
   const [items, setItems] = useState<Suggestion[]>([]);
   const [loading, setLoading] = useState(true);
+  const [refreshTick, setRefreshTick] = useState(0);
+  const shownKeysRef = useRef<Set<string>>(new Set());
 
   useEffect(() => {
     let mounted = true;
+    const salt = Math.floor(Math.random() * 100000);
     const queries = [
-      `${language} latest songs`,
-      `${language} top hits playlist`,
-      `${language} trending music`,
-      `${language} romantic songs`,
+      `${language} latest songs ${salt}`,
+      `${language} top hits playlist ${salt % 7}`,
+      `${language} trending music ${salt % 11}`,
+      `${language} romantic songs ${salt % 5}`,
     ];
 
     setLoading(true);
@@ -370,21 +390,37 @@ function RoomHomePanel({
       .then((lists) => {
         if (!mounted) return;
         const merged = lists.flat() as Suggestion[];
-        const seenNames = new Set<string>();
-        const deduped = merged.filter((x) => {
-          const name = `${(x.title || '').trim().toLowerCase()}::${(x.artist || '').trim().toLowerCase()}`;
-          if (!x?.id || seenNames.has(name)) return false;
-          seenNames.add(name);
+        const seenLocal = new Set<string>();
+        let deduped = merged.filter((x) => {
+          const key = canonicalSongKey(x.title || '', x.artist || '');
+          const noisy = /reaction|review|status|shorts?/i.test(`${x.title || ''} ${x.artist || ''}`);
+          if (!x?.id || noisy || seenLocal.has(key) || shownKeysRef.current.has(key)) return false;
+          seenLocal.add(key);
           return true;
         });
-        setItems(deduped.slice(0, compact ? 8 : 15));
+
+        if (deduped.length < (compact ? 8 : 15)) {
+          // If we run out of fresh cards, allow older pool again.
+          shownKeysRef.current.clear();
+          deduped = merged.filter((x) => {
+            const key = canonicalSongKey(x.title || '', x.artist || '');
+            const noisy = /reaction|review|status|shorts?/i.test(`${x.title || ''} ${x.artist || ''}`);
+            if (!x?.id || noisy || seenLocal.has(key)) return false;
+            seenLocal.add(key);
+            return true;
+          });
+        }
+
+        const next = deduped.slice(0, compact ? 8 : 15);
+        next.forEach((x) => shownKeysRef.current.add(canonicalSongKey(x.title || '', x.artist || '')));
+        setItems(next);
       })
       .finally(() => {
         if (mounted) setLoading(false);
       });
 
     return () => { mounted = false; };
-  }, [language, compact]);
+  }, [language, compact, refreshTick]);
 
   if (loading) {
     return <div className="p-3 grid grid-cols-3 gap-2">{Array.from({ length: compact ? 6 : 9 }).map((_, i) => <div key={i} className="skeleton rounded-xl h-28" />)}</div>;
@@ -392,6 +428,15 @@ function RoomHomePanel({
 
   return (
     <div className="h-full overflow-y-auto p-3">
+      <div className="flex items-center justify-between mb-2">
+        <p className="text-xs text-t3 uppercase tracking-wide">Discover</p>
+        <button
+          onClick={() => setRefreshTick((v) => v + 1)}
+          className="text-xs px-2 py-1 rounded-lg bg-elevated text-t2"
+        >
+          Refresh
+        </button>
+      </div>
       <div className="flex gap-2 overflow-x-auto pb-2 mb-2">
         {HOME_LANGUAGES.map((lang) => (
           <button
@@ -490,14 +535,13 @@ function PlayerCore({
         <div className="flex justify-center mb-3"><Visualizer isPlaying={playbackState.isPlaying} bars={28} /></div>
 
         <div className="flex items-center justify-center gap-6">
-          <button onClick={onShuffle} disabled={!isHostOrDj} className="p-2 text-t3 disabled:opacity-30">↺</button>
           <button onClick={onToggleLoop} className={`p-2 rounded-lg ${playbackState.isLooping ? 'text-accent' : 'text-t3'}`}>↻</button>
           <button onClick={onSkipPrev} disabled={!isHostOrDj} className="p-2 text-t2 disabled:opacity-30">⏮</button>
           <button onClick={playbackState.isPlaying ? onPause : onPlay} disabled={!isHostOrDj} className="w-14 h-14 rounded-full bg-accent text-bg text-2xl disabled:opacity-30">
             {playbackState.isPlaying ? '❚❚' : '▶'}
           </button>
           <button onClick={onSkipNext} disabled={!isHostOrDj} className="p-2 text-t2 disabled:opacity-30">⏭</button>
-          <div className="w-1" />
+          <button onClick={onShuffle} disabled={!isHostOrDj} className="p-2 text-t3 disabled:opacity-30">↺</button>
         </div>
       </div>
   );
