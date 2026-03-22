@@ -360,7 +360,7 @@ export default function RoomPage() {
   const {
     timeOffsetRef, joinRoom, leaveRoom,
     play, pause, seek, skipNext, skipPrev,
-    toggleLoop, sendChat, toggleDjMode, trackEnded,
+    toggleLoop, sendChat, toggleDjMode, trackEnded, syncRequest,
     addToQueue, removeFromQueue, reorderQueue,
   } = useSocket();
 
@@ -447,6 +447,22 @@ export default function RoomPage() {
       warnedLastTrackRef.current = null;
     }
   }, [currentTrack?.youtubeId, playbackState.isPlaying, queue.length]);
+
+  useEffect(() => {
+    const recoverSync = () => {
+      if (typeof document !== 'undefined' && document.visibilityState === 'hidden') return;
+      syncRequest();
+    };
+
+    document.addEventListener('visibilitychange', recoverSync);
+    window.addEventListener('focus', recoverSync);
+    window.addEventListener('pageshow', recoverSync);
+    return () => {
+      document.removeEventListener('visibilitychange', recoverSync);
+      window.removeEventListener('focus', recoverSync);
+      window.removeEventListener('pageshow', recoverSync);
+    };
+  }, [syncRequest]);
 
   useEffect(() => {
     if (!isMobile || typeof window === 'undefined') return;

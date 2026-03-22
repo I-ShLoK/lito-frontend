@@ -24,6 +24,7 @@ export function useAudio({
 }: UseAudioOptions) {
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const driftIntervalRef = useRef<NodeJS.Timeout>();
+  const resumeWatchRef = useRef<NodeJS.Timeout>();
   const startFallbackTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const skipDriftUntilRef = useRef(0);
   const lastHardCorrectionRef = useRef(0);
@@ -45,6 +46,7 @@ export function useAudio({
     }
     return () => {
       if (driftIntervalRef.current) clearInterval(driftIntervalRef.current);
+      if (resumeWatchRef.current) clearInterval(resumeWatchRef.current);
       if (startFallbackTimeoutRef.current) clearTimeout(startFallbackTimeoutRef.current);
     };
   }, []);
@@ -150,6 +152,67 @@ export function useAudio({
     };
   }, [playbackState.isPlaying]);
 
+  // Recovery watchdog: if we should be playing but audio got paused/stalled, retry.
+  useEffect(() => {
+    const audio = audioRef.current;
+    if (!audio) return;
+
+    resumeWatchRef.current = setInterval(() => {
+      if (!playbackState.isPlaying) return;
+      if (!currentTrack) return;
+      if (!audio.paused) return;
+      if (audio.readyState < 2) return;
+
+      const expected = getExpected(playbackState);
+      const drift = Math.abs(expected - audio.currentTime * 1000);
+      if (drift > 1000) {
+        audio.currentTime = expected / 1000;
+      }
+      audio.play().then(() => {
+        pendingPlayRef.current = false;
+      }).catch(() => {
+        pendingPlayRef.current = true;
+      });
+    }, 2000);
+
+    return () => {
+      if (resumeWatchRef.current) {
+        clearInterval(resumeWatchRef.current);
+        resumeWatchRef.current = undefined;
+      }
+    };
+  }, [playbackState, currentTrack, getExpected]);
+
+  // When app returns to foreground/screen turns on, force local playback recovery.
+  useEffect(() => {
+    const audio = audioRef.current;
+    if (!audio) return;
+
+    const recoverOnVisible = () => {
+      if (document.visibilityState !== 'visible') return;
+      if (!playbackState.isPlaying || !currentTrack) return;
+
+      const expected = getExpected(playbackState);
+      if (Math.abs(expected - audio.currentTime * 1000) > 1200) {
+        audio.currentTime = expected / 1000;
+      }
+      audio.play().then(() => {
+        pendingPlayRef.current = false;
+      }).catch(() => {
+        pendingPlayRef.current = true;
+      });
+    };
+
+    document.addEventListener('visibilitychange', recoverOnVisible);
+    window.addEventListener('focus', recoverOnVisible);
+    window.addEventListener('pageshow', recoverOnVisible);
+    return () => {
+      document.removeEventListener('visibilitychange', recoverOnVisible);
+      window.removeEventListener('focus', recoverOnVisible);
+      window.removeEventListener('pageshow', recoverOnVisible);
+    };
+  }, [playbackState, currentTrack, getExpected]);
+
   // Drift correction + position tracking
   useEffect(() => {
     const audio = audioRef.current;
@@ -207,14 +270,48 @@ export function useAudio({
       }
     };
 
+    const recoverPlayback = () => {
+      if (!playbackState.isPlaying || !currentTrack) return;
+      if (audio.readyState < 2) return;
+      const expected = getExpected(playbackState);
+      if (Math.abs(expected - audio.currentTime * 1000) > 1200) {
+        audio.currentTime = expected / 1000;
+      }
+      audio.play().then(() => {
+        pendingPlayRef.current = false;
+      }).catch(() => {
+        pendingPlayRef.current = true;
+      });
+    };
+
+    const handleWaiting = () => {
+      setTimeout(recoverPlayback, 400);
+    };
+
+    const handleStalled = () => {
+      setTimeout(recoverPlayback, 500);
+    };
+
+    const handlePause = () => {
+      // Unexpected pause while we should be playing.
+      if (!playbackState.isPlaying) return;
+      setTimeout(recoverPlayback, 200);
+    };
+
     audio.addEventListener('error', handleError);
     audio.addEventListener('ended', handleEnded);
+    audio.addEventListener('waiting', handleWaiting);
+    audio.addEventListener('stalled', handleStalled);
+    audio.addEventListener('pause', handlePause);
 
     return () => {
       audio.removeEventListener('error', handleError);
       audio.removeEventListener('ended', handleEnded);
+      audio.removeEventListener('waiting', handleWaiting);
+      audio.removeEventListener('stalled', handleStalled);
+      audio.removeEventListener('pause', handlePause);
     };
-  }, [playbackState, isHost, djMode, onTrackEnded, getExpected, currentTrack?.youtubeId]);
+  }, [playbackState, isHost, djMode, onTrackEnded, getExpected, currentTrack, currentTrack?.youtubeId]);
 
   // MediaSession API
   useEffect(() => {
