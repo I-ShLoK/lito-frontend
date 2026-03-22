@@ -282,6 +282,7 @@ export function useSocket() {
 
   const reorderQueue = useCallback((queueItemId: string, newIndex: number) =>
     emit('REORDER_QUEUE', { queueItemId, newIndex }), [emit]);
+  const clearQueue = useCallback(() => emit('CLEAR_QUEUE'), [emit]);
 
   return {
     socket: socketRef.current,
@@ -290,6 +291,7 @@ export function useSocket() {
     skipNext, skipPrev, shuffleQueue, toggleLoop, sendChat,
     toggleDjMode, trackEnded, syncRequest,
     addToQueue, removeFromQueue, reorderQueue,
+    clearQueue,
     connectionState,
     emit,
   };

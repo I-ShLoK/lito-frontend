@@ -1016,7 +1016,7 @@ export default function RoomPage() {
     timeOffsetRef, joinRoom, leaveRoom,
     play, pause, seek, skipNext, skipPrev,
     shuffleQueue, toggleLoop, sendChat, toggleDjMode, trackEnded, syncRequest,
-    addToQueue, removeFromQueue, reorderQueue,
+    addToQueue, removeFromQueue, reorderQueue, clearQueue,
     connectionState,
   } = useSocket();
 
@@ -1442,6 +1442,13 @@ export default function RoomPage() {
     clearRoom();
     router.push('/browse');
   };
+  const clearEntireQueue = () => {
+    if (!isHostOrDj) return;
+    const ok = typeof window === 'undefined' ? true : window.confirm('Clear the entire queue? This will stop current playback.');
+    if (!ok) return;
+    clearQueue();
+    toast.success('Queue cleared');
+  };
 
   const onPlay = () => {
     triggerHaptic();
@@ -1723,6 +1730,8 @@ export default function RoomPage() {
                         smartQueueEnabled={smartQueueEnabled}
                         smartQueueLoading={smartQueueLoading}
                         onToggleSmartQueueEnabled={() => setSmartQueueEnabled((v) => !v)}
+                        canClearQueue={isHostOrDj}
+                        onClearQueue={clearEntireQueue}
                       />
                     )}
                     </div>
@@ -1818,9 +1827,6 @@ export default function RoomPage() {
                   {desktopLeftTab === 'queue' && (
                     <div className="h-full flex flex-col">
                       <div className="flex-1 min-h-0 border-b border-[var(--border)]">
-                        <div className="px-3 py-2 border-b border-[var(--border)]">
-                          <p className="text-[11px] uppercase tracking-wider text-t3">Up Next</p>
-                        </div>
                         <Queue
                           onAddToQueue={addToQueueFromSearch}
                           onRemoveFromQueue={removeFromQueue}
@@ -1829,6 +1835,8 @@ export default function RoomPage() {
                           showSearch={false}
                           onRequestSearch={() => setDesktopLeftTab('search')}
                           showSmartQueueSection={false}
+                          canClearQueue={isHostOrDj}
+                          onClearQueue={clearEntireQueue}
                         />
                       </div>
                       <div className="h-[40%] min-h-[220px]">

@@ -33,6 +33,8 @@ interface QueueProps {
   smartQueueLoading?: boolean;
   onToggleSmartQueueEnabled?: () => void;
   showSmartQueueSection?: boolean;
+  onClearQueue?: () => void;
+  canClearQueue?: boolean;
 }
 
 function formatDuration(ms: number): string {
@@ -55,6 +57,8 @@ export default function Queue({
   smartQueueLoading = false,
   onToggleSmartQueueEnabled,
   showSmartQueueSection = true,
+  onClearQueue,
+  canClearQueue = false,
 }: QueueProps) {
   const queue = useStore((s) => s.queue);
   const currentTrack = useStore((s) => s.currentTrack);
@@ -241,6 +245,20 @@ export default function Queue({
         className="flex-1 overflow-y-auto px-2 pb-2"
         onScroll={(e) => setQueueScrollTop((e.target as HTMLDivElement).scrollTop)}
       >
+        {(canClearQueue && onClearQueue) && (
+          <div className="sticky top-0 z-10 bg-bg/70 backdrop-blur-md px-1 py-2 mb-1 flex items-center justify-between border-b border-[var(--border)]">
+            <p className="text-[11px] uppercase tracking-wider text-t3">Up Next</p>
+            <button
+              onClick={() => {
+                triggerHaptic();
+                onClearQueue();
+              }}
+              className="text-xs px-2 py-1 rounded-lg bg-red-500/20 text-red-300 border border-red-500/40"
+            >
+              Clear Queue
+            </button>
+          </div>
+        )}
         <AnimatePresence>
           {queue.length === 0 ? (
             <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="text-center text-t3 text-sm py-8 px-4 space-y-3">
