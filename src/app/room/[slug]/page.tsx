@@ -41,6 +41,25 @@ interface Suggestion {
   thumbnailUrl: string;
 }
 
+function preferredLanguage(): string {
+  if (typeof navigator === 'undefined') return 'english';
+  const lang = (navigator.language || 'en').toLowerCase();
+  if (lang.startsWith('hi')) return 'hindi';
+  if (lang.startsWith('te')) return 'telugu';
+  if (lang.startsWith('ta')) return 'tamil';
+  if (lang.startsWith('ml')) return 'malayalam';
+  if (lang.startsWith('bn')) return 'bengali';
+  if (lang.startsWith('gu')) return 'gujarati';
+  return 'english';
+}
+
+function avatarColor(seed: string): string {
+  const colors = ['#c8f135', '#f135c8', '#35c8f1', '#f1c835', '#c835f1', '#35f1c8'];
+  let hash = 0;
+  for (const ch of seed) hash = ch.charCodeAt(0) + ((hash << 5) - hash);
+  return colors[Math.abs(hash) % colors.length];
+}
+
 function extractYouTubeId(input: string): string | null {
   const text = input.trim();
   const direct = text.match(/^[a-zA-Z0-9_-]{11}$/);
@@ -332,6 +351,81 @@ function RecommendationsPanel({
   );
 }
 
+function RoomHomePanel({
+  onAddToQueue,
+  compact = false,
+}: {
+  onAddToQueue: (item: { youtubeId: string; title: string; artist: string; durationMs: number; thumbnailUrl: string; mode: 'next' | 'end' }) => void;
+  compact?: boolean;
+}) {
+  const [items, setItems] = useState<Suggestion[]>([]);
+  const [loading, setLoading] = useState(true);
+  const lang = useMemo(() => preferredLanguage(), []);
+
+  useEffect(() => {
+    let mounted = true;
+    const queries = [
+      `${lang} latest songs`,
+      `${lang} top hits playlist`,
+      `${lang} trending music`,
+      `${lang} romantic songs`,
+    ];
+
+    setLoading(true);
+    Promise.all(queries.map((q) => api.get(`/api/music/search?q=${encodeURIComponent(q)}`).then((r) => r.data).catch(() => [])))
+      .then((lists) => {
+        if (!mounted) return;
+        const merged = lists.flat() as Suggestion[];
+        const seenNames = new Set<string>();
+        const deduped = merged.filter((x) => {
+          const name = `${(x.title || '').trim().toLowerCase()}::${(x.artist || '').trim().toLowerCase()}`;
+          if (!x?.id || seenNames.has(name)) return false;
+          seenNames.add(name);
+          return true;
+        });
+        setItems(deduped.slice(0, compact ? 8 : 15));
+      })
+      .finally(() => {
+        if (mounted) setLoading(false);
+      });
+
+    return () => { mounted = false; };
+  }, [lang, compact]);
+
+  if (loading) {
+    return <div className="p-3 grid grid-cols-3 gap-2">{Array.from({ length: compact ? 6 : 9 }).map((_, i) => <div key={i} className="skeleton rounded-xl h-28" />)}</div>;
+  }
+
+  return (
+    <div className="h-full overflow-y-auto p-3">
+      <div className={`grid ${compact ? 'grid-cols-2' : 'grid-cols-3'} gap-2`}>
+        {items.map((item) => (
+          <button
+            key={item.id}
+            onClick={() => onAddToQueue({
+              youtubeId: item.id,
+              title: item.title,
+              artist: item.artist,
+              durationMs: item.durationMs,
+              thumbnailUrl: item.thumbnailUrl,
+              mode: 'end',
+            })}
+            className="text-left rounded-xl overflow-hidden bg-elevated/60 border border-[var(--border)] hover:border-accent/60 transition-colors"
+          >
+            <div className="aspect-square bg-elevated">
+              <Thumb src={item.thumbnailUrl || `https://i.ytimg.com/vi/${item.id}/hqdefault.jpg`} alt={item.title} className="w-full h-full object-cover" />
+            </div>
+            <div className="p-2">
+              <p className="text-sm truncate">{item.title}</p>
+              <p className="text-xs text-t3 truncate">{item.artist}</p>
+            </div>
+          </button>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 function PlayerCore({
   isHostOrDj,
   seekValue,
@@ -414,13 +508,14 @@ export default function RoomPage() {
     roomId, roomName, hostId, djMode,
     currentTrack, queue, playbackState, localPositionMs,
     setRoom, clearRoom, setCurrentTrack, setPlaybackState,
-    setQueue, setParticipants, setDjMode, addMessage, messages,
+    setQueue, setParticipants, setDjMode, addMessage, messages, participants,
   } = useStore();
 
   const [loading, setLoading] = useState(true);
   const [seekValue, setSeekValue] = useState(0);
   const [draggingSeek, setDraggingSeek] = useState(false);
   const [mobileTab, setMobileTab] = useState<'room' | 'player' | 'chat'>('player');
+  const [mobileRoomPanel, setMobileRoomPanel] = useState<'home' | 'listeners'>('home');
   const [mobilePlayerPanel, setMobilePlayerPanel] = useState<'search' | 'recommendations' | 'queue'>('search');
   const [mobileSearchQuery, setMobileSearchQuery] = useState('');
   const [desktopSocialTab, setDesktopSocialTab] = useState<'chat' | 'people'>('chat');
@@ -637,6 +732,7 @@ export default function RoomPage() {
                 onClick={() => {
                   setMobileTab(tab.id);
                   if (tab.id === 'chat') setUnreadChatCount(0);
+                  if (tab.id === 'room') setMobileRoomPanel('home');
                 }}
                 aria-label={tab.label}
                 className={`relative h-11 rounded-2xl flex items-center justify-center transition-all ${mobileTab === tab.id ? 'bg-accent text-bg shadow-[0_10px_30px_rgba(255,255,255,0.22)]' : 'text-t2 bg-white/[0.04]'}`}
@@ -659,14 +755,32 @@ export default function RoomPage() {
                 <div className="px-4 py-3 flex items-center justify-between">
                   <div>
                     <p className="text-sm text-t1">{roomName}</p>
-                    <p className="text-xs text-t3">Room details and listeners</p>
+                    <p className="text-xs text-t3">Room home</p>
                   </div>
                   <div className="flex items-center gap-2">
                     {isHost && <button onClick={toggleDjMode} className="text-xs px-2 py-1 rounded-lg bg-elevated text-t2">DJ</button>}
                     <button onClick={handleLeave} className="text-xs px-2 py-1 rounded-lg bg-elevated text-t2">Leave</button>
                   </div>
                 </div>
-                <div className="flex-1 min-h-0 overflow-hidden"><People /></div>
+                <button
+                  onClick={() => setMobileRoomPanel('listeners')}
+                  className="mx-3 mb-2 px-2 py-2 rounded-xl bg-elevated/60 border border-[var(--border)] flex items-center justify-between"
+                >
+                  <div className="flex -space-x-2 items-center overflow-hidden">
+                    {participants.slice(0, 6).map((p) => (
+                      <div key={p.userId} className="w-7 h-7 rounded-full border border-black flex items-center justify-center text-[10px] font-bold" style={{ background: avatarColor(p.username), color: '#000' }}>
+                        {p.username[0]?.toUpperCase()}
+                      </div>
+                    ))}
+                    <span className="text-xs text-t2 ml-3">{participants.length} listeners</span>
+                  </div>
+                  <span className="text-xs text-t3">Open</span>
+                </button>
+                <div className="flex-1 min-h-0 overflow-hidden">
+                  {mobileRoomPanel === 'listeners'
+                    ? <People />
+                    : <RoomHomePanel onAddToQueue={addToQueueFromSearch} compact />}
+                </div>
               </motion.div>
             )}
 
@@ -745,6 +859,25 @@ export default function RoomPage() {
             <InstallAppButton compact />
             {isHost && <button onClick={toggleDjMode} className="px-3 py-1.5 rounded-lg bg-elevated text-t2">DJ Mode</button>}
             <button onClick={handleLeave} className="px-3 py-1.5 rounded-lg bg-elevated text-t2">Leave</button>
+          </div>
+        </div>
+
+        <div className="apple-glass rounded-2xl overflow-hidden mb-4">
+          <div className="px-4 py-3 border-b border-[var(--border)] flex items-center justify-between">
+            <div>
+              <p className="text-sm text-t2">Room Home</p>
+              <h2 className="text-xl font-display">Recommendations For This Room</h2>
+            </div>
+            <div className="flex -space-x-2 items-center">
+              {participants.slice(0, 8).map((p) => (
+                <div key={p.userId} className="w-8 h-8 rounded-full border border-black flex items-center justify-center text-[10px] font-bold" style={{ background: avatarColor(p.username), color: '#000' }}>
+                  {p.username[0]?.toUpperCase()}
+                </div>
+              ))}
+            </div>
+          </div>
+          <div className="h-[36vh]">
+            <RoomHomePanel onAddToQueue={addToQueueFromSearch} />
           </div>
         </div>
 
