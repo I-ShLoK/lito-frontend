@@ -31,6 +31,8 @@ export function useAudio({
   const skipDriftUntilRef = useRef(0);
   const lastHardCorrectionRef = useRef(0);
   const pendingPlayRef = useRef(false);
+  const sourceModeRef = useRef<'proxy' | 'stream'>('proxy');
+  const consecutiveErrorRef = useRef(0);
   const { playbackState, currentTrack, updateLocalPosition } = useStore();
 
   const getExpected = useCallback((state: typeof playbackState): number => {
@@ -66,6 +68,8 @@ export function useAudio({
 
     audio.pause();
     audio.src = '';
+    sourceModeRef.current = 'proxy';
+    consecutiveErrorRef.current = 0;
 
     const streamUrl = `${API_URL}/api/audio/proxy/${currentTrack.youtubeId}`;
     audio.src = streamUrl;
@@ -257,6 +261,20 @@ export function useAudio({
     const handleError = () => {
       const currentSrc = audio.src;
       if (!currentSrc) return;
+      consecutiveErrorRef.current += 1;
+
+      if (sourceModeRef.current === 'proxy') {
+        sourceModeRef.current = 'stream';
+        audio.src = `${API_URL}/api/audio/stream/${currentTrack?.youtubeId}`;
+        audio.load();
+        return;
+      }
+
+      if (consecutiveErrorRef.current >= 2 && (isHost || djMode)) {
+        onTrackEnded(currentTrack?.youtubeId);
+        return;
+      }
+
       setTimeout(() => {
         audio.src = currentSrc;
         audio.load();

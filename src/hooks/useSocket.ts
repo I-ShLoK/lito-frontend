@@ -41,6 +41,23 @@ export function useSocket() {
   const syncIntervalRef = useRef<NodeJS.Timeout | null>(null);
   const [connectionState, setConnectionState] = useState<'synced' | 'reconnecting'>('reconnecting');
 
+  const resolveCurrentTrackFromState = useCallback((
+    queue: QueueItem[],
+    trackYoutubeId: string | null
+  ): Track | null => {
+    if (!trackYoutubeId) return null;
+    const match = queue.find((q) => q.youtubeId === trackYoutubeId) || queue[0];
+    if (!match) return null;
+    return {
+      id: match.trackId,
+      youtubeId: match.youtubeId,
+      title: match.title,
+      artist: match.artist,
+      durationMs: match.durationMs,
+      thumbnailUrl: match.thumbnailUrl,
+    };
+  }, []);
+
   // Run NTP sync N times, keep the sample with lowest RTT for best accuracy
   const doNtpSync = useCallback((socket: Socket, samples = 3) => {
     let best = { rtt: Infinity, offset: 0 };
@@ -122,14 +139,19 @@ export function useSocket() {
       participants: Participant[];
       djMode: boolean;
     }) => {
+      const mappedQueue = mapQueueItems(queue);
       setPlaybackState(playbackState);
-      setQueue(mapQueueItems(queue));
+      setQueue(mappedQueue);
+      setCurrentTrack(resolveCurrentTrackFromState(mappedQueue, playbackState.trackId));
       setParticipants(participants);
       setDjMode(djMode);
     });
 
     socket.on('QUEUE_UPDATED', ({ queue }: { queue: Record<string, unknown>[] }) => {
-      setQueue(mapQueueItems(queue));
+      const mappedQueue = mapQueueItems(queue);
+      setQueue(mappedQueue);
+      const currentPlayback = useStore.getState().playbackState;
+      setCurrentTrack(resolveCurrentTrackFromState(mappedQueue, currentPlayback.trackId));
     });
 
     socket.on('TRACK_CHANGED', ({ track, positionMs, timestamp }: { track: Track | null; positionMs?: number; timestamp?: number }) => {
@@ -226,7 +248,7 @@ export function useSocket() {
     };
   }, [token, roomId, getSocket, setQueue, setCurrentTrack, setPlaybackState,
       addMessage, setParticipants, setDjMode, markTrackUnplayable,
-      setHost, addParticipant, removeParticipant, updateLocalPosition, doNtpSync]);
+      setHost, addParticipant, removeParticipant, updateLocalPosition, doNtpSync, resolveCurrentTrackFromState]);
 
   useEffect(() => {
     if (!token || !roomId) return;
