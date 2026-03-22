@@ -32,6 +32,7 @@ interface QueueProps {
   smartQueueEnabled?: boolean;
   smartQueueLoading?: boolean;
   onToggleSmartQueueEnabled?: () => void;
+  showSmartQueueSection?: boolean;
 }
 
 function formatDuration(ms: number): string {
@@ -53,6 +54,7 @@ export default function Queue({
   smartQueueEnabled = true,
   smartQueueLoading = false,
   onToggleSmartQueueEnabled,
+  showSmartQueueSection = true,
 }: QueueProps) {
   const { queue, currentTrack, userId } = useStore();
   const [query, setQuery] = useState('');
@@ -128,6 +130,16 @@ export default function Queue({
     if (onReorderQueue && action === 'top') onReorderQueue(menuTargetId, 0);
     triggerHaptic();
     setMenuTargetId(null);
+  };
+
+  const smartTags = (r: VideoResult) => {
+    const text = `${r.title} ${r.artist}`.toLowerCase();
+    const out: string[] = [];
+    if (/telugu|hindi|tamil|punjabi|malayalam|english/.test(text)) out.push('language match');
+    if (/official|audio|lyric|lyrics|album/.test(text)) out.push('room taste');
+    if (/feat|ft|mix|version/.test(text)) out.push('same artist');
+    if (out.length === 0) out.push('room taste');
+    return out.slice(0, 2);
   };
 
   return (
@@ -289,13 +301,13 @@ export default function Queue({
                   animate={{ opacity: 1, x: 0 }}
                   exit={{ opacity: 0, x: -12 }}
                   transition={{ delay: i * 0.04 }}
-                  className={`flex items-center gap-2 p-2 rounded-[var(--radius)] group hover:bg-elevated transition-colors ${isCurrent ? 'bg-elevated' : ''} ${draggingId === item.id ? 'opacity-50' : ''}`}
+                  className={`flex items-center gap-2 p-3 rounded-[var(--radius)] group hover:bg-elevated transition-colors ${isCurrent ? 'bg-white/[0.08] border border-white/20 shadow-[0_0_0_1px_rgba(255,255,255,0.08)]' : ''} ${draggingId === item.id ? 'opacity-50' : ''}`}
                 >
                   <span className="text-xs text-t3 w-8 text-center flex-shrink-0">
                     {isCurrent ? <span className="text-accent inline-flex items-center gap-1"><span className="inline-block w-1.5 h-1.5 rounded-full bg-accent animate-pulse" />Now</span> : i + 1}
                   </span>
                   {isHostOrDj && onReorderQueue && (
-                    <span className="text-t3 text-sm select-none cursor-grab active:cursor-grabbing" title="Drag to reorder">
+                    <span className="text-t3 text-sm select-none cursor-grab active:cursor-grabbing opacity-80" title="Drag to reorder">
                       ||
                     </span>
                   )}
@@ -311,7 +323,7 @@ export default function Queue({
                   </div>
                   <span className="text-xs text-t3 flex-shrink-0 font-mono">{formatDuration(Number(item.durationMs || 0))}</span>
                   {canRemove && (
-                    <button onClick={() => { triggerHaptic(); onRemoveFromQueue(item.id); }} className="opacity-0 group-hover:opacity-100 text-t3 hover:text-t1 transition-opacity text-sm leading-none">
+                    <button onClick={() => { triggerHaptic(); onRemoveFromQueue(item.id); }} className="opacity-70 group-hover:opacity-100 text-t3 hover:text-t1 transition-opacity text-sm leading-none">
                       x
                     </button>
                   )}
@@ -321,6 +333,7 @@ export default function Queue({
           )}
         </AnimatePresence>
 
+        {showSmartQueueSection && (
         <div className="mt-3 pt-3 border-t border-[var(--border)]">
           <div className="flex items-center justify-between px-1 mb-2">
             <p className="text-[11px] uppercase tracking-wider text-t3">Smart Queue</p>
@@ -351,6 +364,11 @@ export default function Queue({
                   <div className="min-w-0 flex-1">
                     <p className="text-xs truncate">{r.title}</p>
                     <p className="text-[11px] text-t3 truncate">{r.artist}</p>
+                    <div className="flex gap-1 mt-1">
+                      {smartTags(r).map((tag) => (
+                        <span key={`${r.id}-${tag}`} className="text-[10px] px-1.5 py-0.5 rounded-full bg-elevated text-t3 border border-[var(--border)]">{tag}</span>
+                      ))}
+                    </div>
                   </div>
                   <button
                     onClick={() => handleAdd(r, 'end')}
@@ -363,6 +381,7 @@ export default function Queue({
             </div>
           )}
         </div>
+        )}
       </div>
 
       <AnimatePresence>

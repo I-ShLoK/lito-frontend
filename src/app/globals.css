@@ -37,6 +37,14 @@ body {
   overflow-x: hidden;
 }
 
+.safe-pb {
+  padding-bottom: calc(env(safe-area-inset-bottom, 0px) + 12px);
+}
+
+.safe-pt {
+  padding-top: calc(env(safe-area-inset-top, 0px) + 8px);
+}
+
 h1, h2, h3, .font-display { font-family: 'Clash Display', system-ui, sans-serif; }
 
 ::-webkit-scrollbar { width: 6px; height: 6px; }
@@ -126,4 +134,35 @@ h1, h2, h3, .font-display { font-family: 'Clash Display', system-ui, sans-serif;
   -webkit-line-clamp: 2;
   -webkit-box-orient: vertical;
   overflow: hidden;
+}
+
+.seeker-range::-webkit-slider-runnable-track {
+  height: 6px;
+  border-radius: 999px;
+  background: color-mix(in srgb, #ffffff 75%, #666);
+}
+
+.seeker-range::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  width: 28px;
+  height: 28px;
+  border-radius: 999px;
+  background: #fff;
+  box-shadow: 0 2px 12px rgba(0, 0, 0, 0.45);
+  margin-top: -11px;
+}
+
+.seeker-range::-moz-range-track {
+  height: 6px;
+  border-radius: 999px;
+  background: color-mix(in srgb, #ffffff 75%, #666);
+}
+
+.seeker-range::-moz-range-thumb {
+  width: 28px;
+  height: 28px;
+  border-radius: 999px;
+  border: none;
+  background: #fff;
+  box-shadow: 0 2px 12px rgba(0, 0, 0, 0.45);
 }

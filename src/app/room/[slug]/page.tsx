@@ -264,6 +264,9 @@ function SearchResultsPanel({
   const [results, setResults] = useState<Suggestion[]>([]);
   const [playlistMode, setPlaylistMode] = useState(false);
   const [recentSearches, setRecentSearches] = useState<string[]>([]);
+  const trimmedQuery = query.trim();
+  const detectedPlaylist = isPlaylistLink(trimmedQuery);
+  const detectedYoutube = !!extractYouTubeId(trimmedQuery);
 
   const pushRecentSearch = useCallback((text: string) => {
     const value = text.trim();
@@ -369,6 +372,11 @@ function SearchResultsPanel({
             className="flex-1 bg-transparent text-sm outline-none text-t1 placeholder:text-t3"
           />
         </div>
+        {(detectedPlaylist || detectedYoutube) && (
+          <div className="mt-2 px-2 py-1.5 rounded-lg bg-elevated border border-[var(--border)] text-[11px] text-t2">
+            {detectedPlaylist ? 'Playlist link detected - import mode ready.' : 'YouTube link detected - direct add mode ready.'}
+          </div>
+        )}
       </div>
       {!query.trim() ? (
         <div className="px-4 py-5 space-y-3">
@@ -702,6 +710,79 @@ function RoomHomePanel({
   );
 }
 
+function SmartQueuePanel({
+  items,
+  loading,
+  enabled,
+  onToggleEnabled,
+  onAdd,
+  currentTrackTitle,
+  roomArtists,
+}: {
+  items: Suggestion[];
+  loading: boolean;
+  enabled: boolean;
+  onToggleEnabled: () => void;
+  onAdd: (item: { youtubeId: string; title: string; artist: string; durationMs: number; thumbnailUrl: string; mode: 'next' | 'end' }) => void;
+  currentTrackTitle?: string;
+  roomArtists: string[];
+}) {
+  const getTags = (item: Suggestion) => {
+    const tags: string[] = [];
+    const itemArtist = (item.artist || '').toLowerCase();
+    if (roomArtists.some((a) => a && itemArtist.includes(a.toLowerCase().split(',')[0].trim()))) tags.push('room taste');
+    if (currentTrackTitle && tokenOverlap(tokenizedTitle(currentTrackTitle), tokenizedTitle(item.title || '')) > 0.22) tags.push('same artist');
+    if (/telugu|hindi|tamil|punjabi|malayalam|english/i.test(`${item.title} ${item.artist}`)) tags.push('language match');
+    return tags.slice(0, 2);
+  };
+
+  return (
+    <div className="h-full flex flex-col">
+      <div className="px-3 py-2 border-b border-[var(--border)] flex items-center justify-between">
+        <p className="text-[11px] uppercase tracking-wider text-t3">Smart Queue</p>
+        <button
+          onClick={onToggleEnabled}
+          className={`text-xs px-2 py-1 rounded-lg border ${enabled ? 'bg-accent text-bg border-accent' : 'bg-elevated text-t2 border-[var(--border)]'}`}
+        >
+          {enabled ? 'Auto-play ON' : 'Auto-play OFF'}
+        </button>
+      </div>
+      <div className="flex-1 min-h-0 overflow-y-auto p-2 space-y-1">
+        {loading ? (
+          Array.from({ length: 4 }).map((_, i) => <div key={i} className="skeleton h-12 rounded-xl" />)
+        ) : items.length === 0 ? (
+          <div className="text-xs text-t3 px-2 py-2">No smart suggestions yet. Play a song to generate them.</div>
+        ) : (
+          items.slice(0, 8).map((r) => (
+            <div key={`smart-desktop-${r.id}`} className="flex items-center gap-2 p-2 rounded-xl hover:bg-elevated group">
+              <div className="w-10 h-10 rounded-lg overflow-hidden bg-elevated">
+                <Thumb src={r.thumbnailUrl || `https://i.ytimg.com/vi/${r.id}/hqdefault.jpg`} alt="" className="w-full h-full object-cover" />
+              </div>
+              <div className="min-w-0 flex-1">
+                <p className="text-xs truncate">{r.title}</p>
+                <p className="text-[11px] text-t3 truncate">{r.artist}</p>
+                <div className="flex gap-1 mt-1">
+                  {getTags(r).map((tag) => (
+                    <span key={`${r.id}-${tag}`} className="text-[10px] px-1.5 py-0.5 rounded-full bg-elevated text-t3 border border-[var(--border)]">
+                      {tag}
+                    </span>
+                  ))}
+                </div>
+              </div>
+              <button
+                onClick={() => onAdd({ youtubeId: r.id, title: r.title, artist: r.artist, durationMs: r.durationMs, thumbnailUrl: r.thumbnailUrl, mode: 'end' })}
+                className="text-xs px-2 py-1.5 rounded-lg bg-accent text-bg opacity-0 group-hover:opacity-100 transition-opacity"
+              >
+                Add
+              </button>
+            </div>
+          ))
+        )}
+      </div>
+    </div>
+  );
+}
+
 function PlayerCore({
   isHostOrDj,
   seekValue,
@@ -715,6 +796,8 @@ function PlayerCore({
   onToggleLoop,
   volume,
   onVolumeChange,
+  onSeekStart,
+  onSeekEnd,
 }: {
   isHostOrDj: boolean;
   seekValue: number;
@@ -728,8 +811,11 @@ function PlayerCore({
   onToggleLoop: () => void;
   volume: number;
   onVolumeChange: (value: number) => void;
+  onSeekStart?: () => void;
+  onSeekEnd?: () => void;
 }) {
   const { currentTrack, playbackState } = useStore();
+  const [showSecondaryControls, setShowSecondaryControls] = useState(false);
 
   return (
     <div className="mx-auto max-w-md">
@@ -746,7 +832,7 @@ function PlayerCore({
 
         <div className="mb-3">
           <input
-            className="w-full h-2 accent-[var(--accent)] cursor-pointer"
+            className="w-full h-11 appearance-none bg-transparent cursor-pointer seeker-range"
             type="range"
             min={0}
             max={currentTrack?.durationMs || 100}
@@ -754,6 +840,9 @@ function PlayerCore({
             onChange={(e) => onSeekPreview(Number(e.target.value))}
             onMouseUp={(e) => onSeekCommit(Number((e.target as HTMLInputElement).value))}
             onTouchEnd={(e) => onSeekCommit(Number((e.target as HTMLInputElement).value))}
+            onMouseDown={onSeekStart}
+            onTouchStart={onSeekStart}
+            onPointerUp={onSeekEnd}
             disabled={!isHostOrDj}
           />
           <div className="flex justify-between text-xs text-t3 font-mono mt-1">
@@ -765,14 +854,28 @@ function PlayerCore({
         <div className="flex justify-center mb-3"><Visualizer isPlaying={playbackState.isPlaying} bars={28} /></div>
 
         <div className="flex items-center justify-center gap-6">
-          <button onClick={onToggleLoop} className={`p-2 rounded-lg ${playbackState.isLooping ? 'text-accent' : 'text-t3'}`}>↻</button>
+          <button onClick={onShuffle} disabled={!isHostOrDj} className="p-2 text-t3 disabled:opacity-30">↺</button>
           <button onClick={onSkipPrev} disabled={!isHostOrDj} className="p-2 text-t2 disabled:opacity-30">⏮</button>
           <button onClick={playbackState.isPlaying ? onPause : onPlay} disabled={!isHostOrDj} className="w-14 h-14 rounded-full bg-accent text-bg text-2xl disabled:opacity-30">
             {playbackState.isPlaying ? '❚❚' : '▶'}
           </button>
           <button onClick={onSkipNext} disabled={!isHostOrDj} className="p-2 text-t2 disabled:opacity-30">⏭</button>
-          <button onClick={onShuffle} disabled={!isHostOrDj} className="p-2 text-t3 disabled:opacity-30">↺</button>
+          <button onClick={() => setShowSecondaryControls((v) => !v)} className="p-2 text-t3">⋯</button>
         </div>
+
+        <AnimatePresence>
+          {showSecondaryControls && (
+            <motion.div
+              initial={{ opacity: 0, y: 6 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: 6 }}
+              className="mt-2 flex items-center justify-center gap-3"
+            >
+              <button onClick={onToggleLoop} className={`px-3 py-1.5 rounded-lg text-xs ${playbackState.isLooping ? 'bg-accent text-bg' : 'bg-elevated text-t2'}`}>Loop</button>
+              <button onClick={onShuffle} disabled={!isHostOrDj} className="px-3 py-1.5 rounded-lg text-xs bg-elevated text-t2 disabled:opacity-30">Shuffle</button>
+            </motion.div>
+          )}
+        </AnimatePresence>
 
         <div className="mt-4 px-2 flex items-center gap-2">
           <span className="text-xs text-t3">Vol</span>
@@ -810,6 +913,7 @@ export default function RoomPage() {
   const [mobileTab, setMobileTab] = useState<'room' | 'player' | 'chat'>('player');
   const [mobileRoomPanel, setMobileRoomPanel] = useState<'home' | 'listeners'>('home');
   const [mobilePlayerPanel, setMobilePlayerPanel] = useState<'search' | 'recommendations' | 'queue'>('search');
+  const [mobilePanelSnap, setMobilePanelSnap] = useState<35 | 65 | 92>(65);
   const [mobileSearchQuery, setMobileSearchQuery] = useState('');
   const [desktopSocialTab, setDesktopSocialTab] = useState<'chat' | 'people'>('chat');
   const [desktopLeftTab, setDesktopLeftTab] = useState<'queue' | 'search' | 'recommendations'>('queue');
@@ -823,14 +927,18 @@ export default function RoomPage() {
   const [unreadChatCount, setUnreadChatCount] = useState(0);
   const [homeLanguage, setHomeLanguage] = useState<HomeLanguage>('english');
   const [volume, setVolume] = useState(0.92);
+  const [isOffline, setIsOffline] = useState(false);
+  const [showInstallCard, setShowInstallCard] = useState(false);
   const [smartQueueEnabled, setSmartQueueEnabled] = useState(true);
   const [smartQueueItems, setSmartQueueItems] = useState<Suggestion[]>([]);
   const [smartQueueLoading, setSmartQueueLoading] = useState(false);
 
   const touchStartXRef = useRef<number | null>(null);
+  const touchStartYRef = useRef<number | null>(null);
   const warnedLastTrackRef = useRef<string | null>(null);
   const prevMessageCountRef = useRef(0);
   const smartQueueAutoRef = useRef('');
+  const drawerResizeRef = useRef<'left' | 'right' | null>(null);
   const isHost = userId === hostId;
   const isHostOrDj = isHost || djMode;
   const roomArtists = useMemo(() => {
@@ -845,6 +953,11 @@ export default function RoomPage() {
       .slice(0, 4)
       .map(([artist]) => artist);
   }, [queue]);
+
+  const desktopPlayerMaxWidth = useMemo(() => {
+    const reduction = (desktopLeftOpen ? desktopLeftWidth : 0) + (desktopRightOpen ? desktopRightWidth : 0);
+    return Math.max(760, 1240 - reduction * 0.5);
+  }, [desktopLeftOpen, desktopRightOpen, desktopLeftWidth, desktopRightWidth]);
 
   const {
     timeOffsetRef, joinRoom, leaveRoom,
@@ -987,6 +1100,30 @@ export default function RoomPage() {
   }, [desktopRightWidth]);
 
   useEffect(() => {
+    const onMove = (e: MouseEvent) => {
+      if (!drawerResizeRef.current || typeof window === 'undefined') return;
+      if (drawerResizeRef.current === 'left') {
+        const next = Math.max(300, Math.min(560, e.clientX - 20));
+        setDesktopLeftWidth(next);
+      } else {
+        const next = Math.max(300, Math.min(560, window.innerWidth - e.clientX - 20));
+        setDesktopRightWidth(next);
+      }
+    };
+    const onUp = () => {
+      drawerResizeRef.current = null;
+      if (typeof document !== 'undefined') document.body.style.cursor = '';
+    };
+
+    window.addEventListener('mousemove', onMove);
+    window.addEventListener('mouseup', onUp);
+    return () => {
+      window.removeEventListener('mousemove', onMove);
+      window.removeEventListener('mouseup', onUp);
+    };
+  }, []);
+
+  useEffect(() => {
     if (typeof window === 'undefined') return;
     window.localStorage.setItem('lito-smart-queue-enabled', smartQueueEnabled ? '1' : '0');
   }, [smartQueueEnabled]);
@@ -1037,14 +1174,22 @@ export default function RoomPage() {
 
     const ua = window.navigator.userAgent.toLowerCase();
     const isIOS = /iphone|ipad|ipod/.test(ua);
-    if (isIOS) {
-      toast('Install LiTo as an app: open Share and tap "Add to Home Screen".', { duration: 7000 });
-    } else {
-      toast('Install LiTo as an app for better performance. Use the Install App button.', { duration: 5500 });
-    }
+    setShowInstallCard(true);
 
     window.localStorage.setItem(promptKey, String(Date.now()));
   }, [isMobile]);
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const update = () => setIsOffline(!window.navigator.onLine);
+    update();
+    window.addEventListener('online', update);
+    window.addEventListener('offline', update);
+    return () => {
+      window.removeEventListener('online', update);
+      window.removeEventListener('offline', update);
+    };
+  }, []);
 
   useEffect(() => {
     if (typeof window === 'undefined') return;
@@ -1198,6 +1343,13 @@ export default function RoomPage() {
     setDraggingSeek(false);
     if (isHostOrDj) seek(value);
   };
+  const handleSeekStart = () => {
+    setDraggingSeek(true);
+    triggerHaptic(8);
+  };
+  const handleSeekEnd = () => {
+    triggerHaptic(8);
+  };
 
   const handleLeave = () => {
     if (roomId) leaveRoom(roomId);
@@ -1270,7 +1422,7 @@ export default function RoomPage() {
     };
 
     return (
-      <div className="min-h-screen bg-bg pb-6">
+      <div className="min-h-screen bg-bg safe-pt safe-pb">
         <div className="mesh-bg">
           <div className="mesh-blob w-80 h-80 -top-20 -left-20" style={{ background: 'var(--accent)' }} />
           <div className="mesh-blob w-80 h-80 top-1/2 -right-24" style={{ background: 'var(--accent-dim)' }} />
@@ -1300,7 +1452,7 @@ export default function RoomPage() {
                   if (tab.id === 'room') setMobileRoomPanel('home');
                 }}
                 aria-label={tab.label}
-                className={`relative h-11 rounded-2xl flex items-center justify-center transition-all ${mobileTab === tab.id ? 'bg-accent text-bg shadow-[0_10px_30px_rgba(255,255,255,0.22)]' : 'text-t2 bg-white/[0.04]'}`}
+                className={`relative h-11 rounded-2xl flex items-center justify-center transition-all active:scale-95 ${mobileTab === tab.id ? 'bg-accent text-bg shadow-[0_10px_30px_rgba(255,255,255,0.22)] scale-[1.02]' : 'text-t2 bg-white/[0.04]'}`}
               >
                 {tab.icon}
                 {tab.id === 'chat' && unreadChatCount > 0 && (
@@ -1386,24 +1538,58 @@ export default function RoomPage() {
                       onToggleLoop={onToggleLoopAction}
                       volume={volume}
                       onVolumeChange={setVolume}
+                      onSeekStart={handleSeekStart}
+                      onSeekEnd={handleSeekEnd}
                     />
                   </div>
 
-                  <div className="px-3 pb-3">
-                    <div className="apple-glass glow-accent rounded-[24px] px-4 py-2 flex items-center justify-around">
-                      <button onClick={() => { triggerHaptic(); setMobilePlayerPanel('search'); }} className={`h-11 w-11 rounded-2xl flex items-center justify-center ${mobilePlayerPanel === 'search' ? 'bg-accent text-bg shadow-[0_10px_30px_rgba(255,255,255,0.22)]' : 'text-t2'}`} aria-label="Search">
-                        <SearchIcon />
-                      </button>
-                      <button onClick={() => { triggerHaptic(); setMobilePlayerPanel('recommendations'); }} className={`h-11 w-11 rounded-2xl flex items-center justify-center ${mobilePlayerPanel === 'recommendations' ? 'bg-accent text-bg shadow-[0_10px_30px_rgba(255,255,255,0.22)]' : 'text-t2'}`} aria-label="Recommendations">
-                        <RecommendIcon />
-                      </button>
-                      <button onClick={() => { triggerHaptic(); setMobilePlayerPanel('queue'); }} className={`h-11 w-11 rounded-2xl flex items-center justify-center ${mobilePlayerPanel === 'queue' ? 'bg-accent text-bg shadow-[0_10px_30px_rgba(255,255,255,0.22)]' : 'text-t2'}`} aria-label="Queue">
-                        <QueueIcon />
-                      </button>
+                  <div
+                    className="border-t border-[var(--border)] overflow-hidden rounded-t-2xl apple-glass"
+                    style={{ height: `${mobilePanelSnap}vh` }}
+                    onTouchStart={(e) => { touchStartYRef.current = e.changedTouches[0].clientY; }}
+                    onTouchEnd={(e) => {
+                      if (touchStartYRef.current === null) return;
+                      const delta = e.changedTouches[0].clientY - touchStartYRef.current;
+                      if (Math.abs(delta) < 28) return;
+                      const snaps: Array<35 | 65 | 92> = [35, 65, 92];
+                      const idx = snaps.indexOf(mobilePanelSnap);
+                      if (delta < 0 && idx < snaps.length - 1) setMobilePanelSnap(snaps[idx + 1]);
+                      if (delta > 0 && idx > 0) setMobilePanelSnap(snaps[idx - 1]);
+                    }}
+                  >
+                    <div className="sticky top-0 z-10 bg-bg/65 backdrop-blur-md">
+                      <div className="pt-2 pb-1 flex justify-center">
+                        <button
+                          onClick={() => setMobilePanelSnap((v) => (v === 35 ? 65 : v === 65 ? 92 : 35))}
+                          className="w-14 h-1.5 rounded-full bg-white/30"
+                          aria-label="Resize panel"
+                        />
+                      </div>
+                      <div className="px-3 pb-1">
+                        <div className="flex items-center justify-between mb-2">
+                          <div>
+                            <p className="text-xs text-t2 truncate max-w-[240px]">{currentTrack?.title || 'Nothing playing'}</p>
+                            <p className="text-[11px] text-t3 truncate max-w-[240px]">{currentTrack?.artist || '-'}</p>
+                          </div>
+                          <div className="inline-flex items-center gap-1 text-[10px] text-t3">
+                            <span className={`inline-block w-1.5 h-1.5 rounded-full ${connectionState === 'synced' ? 'bg-emerald-400' : 'bg-amber-400 animate-pulse'}`} />
+                            {connectionState === 'synced' ? 'Synced' : 'Reconnecting'}
+                          </div>
+                        </div>
+                        <div className="apple-glass glow-accent rounded-[24px] px-4 py-2 flex items-center justify-around">
+                          <button onClick={() => { triggerHaptic(); setMobilePlayerPanel('search'); }} className={`h-11 w-11 rounded-2xl flex items-center justify-center active:scale-95 ${mobilePlayerPanel === 'search' ? 'bg-accent text-bg shadow-[0_10px_30px_rgba(255,255,255,0.22)]' : 'text-t2'}`} aria-label="Search">
+                            <SearchIcon />
+                          </button>
+                          <button onClick={() => { triggerHaptic(); setMobilePlayerPanel('recommendations'); }} className={`h-11 w-11 rounded-2xl flex items-center justify-center active:scale-95 ${mobilePlayerPanel === 'recommendations' ? 'bg-accent text-bg shadow-[0_10px_30px_rgba(255,255,255,0.22)]' : 'text-t2'}`} aria-label="Recommendations">
+                            <RecommendIcon />
+                          </button>
+                          <button onClick={() => { triggerHaptic(); setMobilePlayerPanel('queue'); }} className={`h-11 w-11 rounded-2xl flex items-center justify-center active:scale-95 ${mobilePlayerPanel === 'queue' ? 'bg-accent text-bg shadow-[0_10px_30px_rgba(255,255,255,0.22)]' : 'text-t2'}`} aria-label="Queue">
+                            <QueueIcon />
+                          </button>
+                        </div>
+                      </div>
                     </div>
-                  </div>
-
-                  <div className="h-[30vh] border-t border-[var(--border)] overflow-hidden">
+                    <div className="h-full overflow-y-auto">
                     {mobilePlayerPanel === 'search' && (
                       <SearchResultsPanel
                         query={mobileSearchQuery}
@@ -1427,6 +1613,7 @@ export default function RoomPage() {
                         onToggleSmartQueueEnabled={() => setSmartQueueEnabled((v) => !v)}
                       />
                     )}
+                    </div>
                   </div>
                 </div>
               </motion.div>
@@ -1439,7 +1626,21 @@ export default function RoomPage() {
             )}
           </AnimatePresence>
         </div>
-
+        <AnimatePresence>
+          {isOffline && (
+            <motion.div initial={{ opacity: 0, y: 14 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: 14 }} className="fixed left-4 right-4 bottom-6 z-50 apple-glass rounded-xl px-3 py-2 text-xs text-t2">
+              Offline mode: reconnecting to room...
+            </motion.div>
+          )}
+        </AnimatePresence>
+        <AnimatePresence>
+          {showInstallCard && (
+            <motion.div initial={{ opacity: 0, y: 14 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: 14 }} className="fixed left-4 right-4 bottom-20 z-40 apple-glass rounded-xl px-3 py-2 text-xs text-t2 flex items-center justify-between">
+              <span>Install LiTo for smoother background playback.</span>
+              <button onClick={() => setShowInstallCard(false)} className="px-2 py-1 rounded-lg bg-elevated text-t2">Hide</button>
+            </motion.div>
+          )}
+        </AnimatePresence>
       </div>
     );
   }
@@ -1491,33 +1692,37 @@ export default function RoomPage() {
               >
                 <div className="px-3 py-2 border-b border-[var(--border)] flex items-center justify-between gap-2">
                   <p className="text-xs uppercase tracking-wider text-t3">{desktopLeftTab}</p>
-                  <div className="flex items-center gap-2">
-                    <input
-                      type="range"
-                      min={300}
-                      max={520}
-                      step={10}
-                      value={desktopLeftWidth}
-                      onChange={(e) => setDesktopLeftWidth(Number(e.target.value))}
-                      className="w-20 accent-[var(--accent)]"
-                    />
-                    <button onClick={() => setDesktopLeftOpen(false)} className="text-xs px-2 py-1 rounded-lg bg-elevated text-t2">Close</button>
-                  </div>
+                  <button onClick={() => setDesktopLeftOpen(false)} className="text-xs px-2 py-1 rounded-lg bg-elevated text-t2">Close</button>
                 </div>
                 <div className="flex-1 min-h-0 overflow-hidden">
                   {desktopLeftTab === 'queue' && (
-                    <Queue
-                      onAddToQueue={addToQueueFromSearch}
-                      onRemoveFromQueue={removeFromQueue}
-                      onReorderQueue={reorderQueue}
-                      isHostOrDj={isHostOrDj}
-                      showSearch={false}
-                      onRequestSearch={() => setDesktopLeftTab('search')}
-                      smartQueueItems={smartQueueItems}
-                      smartQueueEnabled={smartQueueEnabled}
-                      smartQueueLoading={smartQueueLoading}
-                      onToggleSmartQueueEnabled={() => setSmartQueueEnabled((v) => !v)}
-                    />
+                    <div className="h-full flex flex-col">
+                      <div className="flex-1 min-h-0 border-b border-[var(--border)]">
+                        <div className="px-3 py-2 border-b border-[var(--border)]">
+                          <p className="text-[11px] uppercase tracking-wider text-t3">Up Next</p>
+                        </div>
+                        <Queue
+                          onAddToQueue={addToQueueFromSearch}
+                          onRemoveFromQueue={removeFromQueue}
+                          onReorderQueue={reorderQueue}
+                          isHostOrDj={isHostOrDj}
+                          showSearch={false}
+                          onRequestSearch={() => setDesktopLeftTab('search')}
+                          showSmartQueueSection={false}
+                        />
+                      </div>
+                      <div className="h-[40%] min-h-[220px]">
+                        <SmartQueuePanel
+                          items={smartQueueItems}
+                          loading={smartQueueLoading}
+                          enabled={smartQueueEnabled}
+                          onToggleEnabled={() => setSmartQueueEnabled((v) => !v)}
+                          onAdd={addToQueueFromSearch}
+                          currentTrackTitle={currentTrack?.title}
+                          roomArtists={roomArtists}
+                        />
+                      </div>
+                    </div>
                   )}
                   {desktopLeftTab === 'search' && (
                     <SearchResultsPanel
@@ -1529,6 +1734,15 @@ export default function RoomPage() {
                   )}
                   {desktopLeftTab === 'recommendations' && <RecommendationsPanel onAddToQueue={addToQueueFromSearch} />}
                 </div>
+                <div
+                  className="absolute top-0 right-0 h-full w-2 cursor-ew-resize"
+                  onMouseDown={() => {
+                    drawerResizeRef.current = 'left';
+                    if (typeof document !== 'undefined') document.body.style.cursor = 'ew-resize';
+                  }}
+                  onDoubleClick={() => setDesktopLeftWidth(360)}
+                  title="Drag to resize"
+                />
               </motion.div>
             )}
           </AnimatePresence>
@@ -1550,22 +1764,20 @@ export default function RoomPage() {
                       </button>
                     ))}
                   </div>
-                  <div className="flex items-center gap-2">
-                    <input
-                      type="range"
-                      min={300}
-                      max={520}
-                      step={10}
-                      value={desktopRightWidth}
-                      onChange={(e) => setDesktopRightWidth(Number(e.target.value))}
-                      className="w-20 accent-[var(--accent)]"
-                    />
-                    <button onClick={() => setDesktopRightOpen(false)} className="text-xs px-2 py-1 rounded-lg bg-elevated text-t2">Close</button>
-                  </div>
+                  <button onClick={() => setDesktopRightOpen(false)} className="text-xs px-2 py-1 rounded-lg bg-elevated text-t2">Close</button>
                 </div>
                 <div className="flex-1 min-h-0 overflow-hidden">
                   {desktopSocialTab === 'chat' ? <Chat onSendMessage={sendChat} /> : <People />}
                 </div>
+                <div
+                  className="absolute top-0 left-0 h-full w-2 cursor-ew-resize"
+                  onMouseDown={() => {
+                    drawerResizeRef.current = 'right';
+                    if (typeof document !== 'undefined') document.body.style.cursor = 'ew-resize';
+                  }}
+                  onDoubleClick={() => setDesktopRightWidth(360)}
+                  title="Drag to resize"
+                />
               </motion.div>
             )}
           </AnimatePresence>
@@ -1577,7 +1789,7 @@ export default function RoomPage() {
               paddingRight: desktopRightOpen ? desktopRightWidth + 16 : 0,
             }}
           >
-            <div className="apple-glass rounded-3xl p-5 w-full max-w-4xl">
+            <div className="apple-glass rounded-3xl p-5 w-full" style={{ maxWidth: desktopPlayerMaxWidth }}>
               <PlayerCore
                 isHostOrDj={isHostOrDj}
                 seekValue={seekValue}
@@ -1591,30 +1803,9 @@ export default function RoomPage() {
                 onToggleLoop={onToggleLoopAction}
                 volume={volume}
                 onVolumeChange={setVolume}
+                onSeekStart={handleSeekStart}
+                onSeekEnd={handleSeekEnd}
               />
-              <div className="mt-4 border-t border-[var(--border)] pt-3">
-                <div className="flex items-center justify-between mb-2">
-                  <p className="text-[11px] uppercase tracking-wider text-t3">Smart Queue Preview</p>
-                  <button onClick={() => setSmartQueueEnabled((v) => !v)} className={`text-xs px-2 py-1 rounded-lg border ${smartQueueEnabled ? 'bg-accent text-bg border-accent' : 'bg-elevated text-t2 border-[var(--border)]'}`}>
-                    {smartQueueEnabled ? 'Auto ON' : 'Auto OFF'}
-                  </button>
-                </div>
-                <div className="flex gap-2 overflow-x-auto">
-                  {smartQueueItems.slice(0, 5).map((item) => (
-                    <button
-                      key={`smart-preview-${item.id}`}
-                      onClick={() => addToQueueFromSearch({ youtubeId: item.id, title: item.title, artist: item.artist, durationMs: item.durationMs, thumbnailUrl: item.thumbnailUrl, mode: 'end' })}
-                      className="min-w-[180px] text-left rounded-xl bg-elevated/70 border border-[var(--border)] p-2 hover:border-accent/60"
-                    >
-                      <p className="text-xs truncate">{item.title}</p>
-                      <p className="text-[11px] text-t3 truncate">{item.artist}</p>
-                    </button>
-                  ))}
-                  {smartQueueItems.length === 0 && (
-                    <div className="text-xs text-t3 px-2 py-1">No smart suggestions yet.</div>
-                  )}
-                </div>
-              </div>
             </div>
           </div>
         </div>
@@ -1673,6 +1864,13 @@ export default function RoomPage() {
               <p><span className="text-t1">Space</span> Play/Pause</p>
               <p><span className="text-t1">←/→</span> Seek 5s</p>
               <p><span className="text-t1">N / P</span> Next / Previous</p>
+            </motion.div>
+          )}
+        </AnimatePresence>
+        <AnimatePresence>
+          {isOffline && (
+            <motion.div initial={{ opacity: 0, y: 14 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: 14 }} className="fixed left-1/2 -translate-x-1/2 bottom-6 z-50 apple-glass rounded-xl px-3 py-2 text-xs text-t2">
+              Offline mode: reconnecting to room...
             </motion.div>
           )}
         </AnimatePresence>
