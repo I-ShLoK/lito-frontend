@@ -27,6 +27,7 @@ interface QueueProps {
   onReorderQueue?: (id: string, newIndex: number) => void;
   isHostOrDj: boolean;
   showSearch?: boolean;
+  onRequestSearch?: () => void;
 }
 
 function formatDuration(ms: number): string {
@@ -37,13 +38,15 @@ function formatDuration(ms: number): string {
   return `${m}:${sec.toString().padStart(2, '0')}`;
 }
 
-export default function Queue({ onAddToQueue, onRemoveFromQueue, onReorderQueue, isHostOrDj, showSearch = true }: QueueProps) {
+export default function Queue({ onAddToQueue, onRemoveFromQueue, onReorderQueue, isHostOrDj, showSearch = true, onRequestSearch }: QueueProps) {
   const { queue, currentTrack, userId } = useStore();
   const [query, setQuery] = useState('');
   const [results, setResults] = useState<VideoResult[]>([]);
   const [searching, setSearching] = useState(false);
   const [showResults, setShowResults] = useState(false);
   const [draggingId, setDraggingId] = useState<string | null>(null);
+  const [menuTargetId, setMenuTargetId] = useState<string | null>(null);
+  const longPressTimerRef = useRef<NodeJS.Timeout | null>(null);
   const wrapperRef = useRef<HTMLDivElement>(null);
 
   const doSearch = async (q: string) => {
@@ -68,13 +71,19 @@ export default function Queue({ onAddToQueue, onRemoveFromQueue, onReorderQueue,
     const handler = (e: MouseEvent) => {
       if (wrapperRef.current && !wrapperRef.current.contains(e.target as Node)) {
         setShowResults(false);
+        setMenuTargetId(null);
       }
     };
     document.addEventListener('mousedown', handler);
     return () => document.removeEventListener('mousedown', handler);
   }, []);
 
+  const triggerHaptic = () => {
+    if (typeof navigator !== 'undefined' && typeof navigator.vibrate === 'function') navigator.vibrate(12);
+  };
+
   const handleAdd = (result: VideoResult, mode: 'next' | 'end') => {
+    triggerHaptic();
     onAddToQueue({
       youtubeId: result.id,
       title: result.title,
@@ -95,8 +104,19 @@ export default function Queue({ onAddToQueue, onRemoveFromQueue, onReorderQueue,
     setDraggingId(null);
   };
 
+  const handleMenuAction = (action: 'next' | 'top' | 'remove') => {
+    if (!menuTargetId) return;
+    const idx = queue.findIndex((q) => q.id === menuTargetId);
+    if (idx < 0) return;
+    if (action === 'remove') onRemoveFromQueue(menuTargetId);
+    if (onReorderQueue && action === 'next') onReorderQueue(menuTargetId, currentTrack ? 1 : 0);
+    if (onReorderQueue && action === 'top') onReorderQueue(menuTargetId, 0);
+    triggerHaptic();
+    setMenuTargetId(null);
+  };
+
   return (
-    <div className="flex flex-col h-full">
+    <div className="relative flex flex-col h-full">
       {showSearch && (
         <div className="p-3 relative" ref={wrapperRef}>
           <div className="relative">
@@ -188,8 +208,33 @@ export default function Queue({ onAddToQueue, onRemoveFromQueue, onReorderQueue,
       <div className="flex-1 overflow-y-auto px-2 pb-2">
         <AnimatePresence>
           {queue.length === 0 ? (
-            <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="text-center text-t3 text-sm py-8 px-4">
-              {showSearch ? 'Queue is empty - search for a song above' : 'Queue is empty'}
+            <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="text-center text-t3 text-sm py-8 px-4 space-y-3">
+              <p>{showSearch ? 'No queue yet.' : 'No queue yet.'}</p>
+              {showSearch ? (
+                <div className="flex justify-center flex-wrap gap-2">
+                  {['latest telugu songs', 'hindi hits', 'english pop', 'tamil playlist'].map((chip) => (
+                    <button
+                      key={chip}
+                      onClick={() => {
+                        setQuery(chip);
+                        doSearch(chip);
+                      }}
+                      className="text-xs px-3 py-1.5 rounded-full bg-elevated border border-[var(--border)] text-t2 hover:text-t1"
+                    >
+                      {chip}
+                    </button>
+                  ))}
+                </div>
+              ) : (
+                onRequestSearch && (
+                  <button
+                    onClick={onRequestSearch}
+                    className="text-xs px-3 py-1.5 rounded-full bg-elevated border border-[var(--border)] text-t2 hover:text-t1"
+                  >
+                    Open search to add songs
+                  </button>
+                )
+              )}
             </motion.div>
           ) : (
             queue.map((item, i) => {
@@ -206,13 +251,34 @@ export default function Queue({ onAddToQueue, onRemoveFromQueue, onReorderQueue,
                   }}
                   onDrop={() => handleDrop(item.id)}
                   onDragEnd={() => setDraggingId(null)}
+                  onContextMenu={(e) => {
+                    if (!isHostOrDj) return;
+                    e.preventDefault();
+                    setMenuTargetId(item.id);
+                  }}
+                  onTouchStart={() => {
+                    if (!isHostOrDj) return;
+                    if (longPressTimerRef.current) clearTimeout(longPressTimerRef.current);
+                    longPressTimerRef.current = setTimeout(() => {
+                      setMenuTargetId(item.id);
+                      triggerHaptic();
+                    }, 480);
+                  }}
+                  onTouchEnd={() => {
+                    if (longPressTimerRef.current) {
+                      clearTimeout(longPressTimerRef.current);
+                      longPressTimerRef.current = null;
+                    }
+                  }}
                   initial={{ opacity: 0, x: -12 }}
                   animate={{ opacity: 1, x: 0 }}
                   exit={{ opacity: 0, x: -12 }}
                   transition={{ delay: i * 0.04 }}
                   className={`flex items-center gap-2 p-2 rounded-[var(--radius)] group hover:bg-elevated transition-colors ${isCurrent ? 'bg-elevated' : ''} ${draggingId === item.id ? 'opacity-50' : ''}`}
                 >
-                  <span className="text-xs text-t3 w-8 text-center flex-shrink-0">{isCurrent ? <span className="text-accent">Now</span> : i + 1}</span>
+                  <span className="text-xs text-t3 w-8 text-center flex-shrink-0">
+                    {isCurrent ? <span className="text-accent inline-flex items-center gap-1"><span className="inline-block w-1.5 h-1.5 rounded-full bg-accent animate-pulse" />Now</span> : i + 1}
+                  </span>
                   {isHostOrDj && onReorderQueue && (
                     <span className="text-t3 text-sm select-none cursor-grab active:cursor-grabbing" title="Drag to reorder">
                       ||
@@ -223,11 +289,14 @@ export default function Queue({ onAddToQueue, onRemoveFromQueue, onReorderQueue,
                   </div>
                   <div className="flex-1 min-w-0">
                     <p className={`text-xs font-medium truncate ${isCurrent ? 'text-accent' : 'text-t1'}`}>{item.title}</p>
-                    <p className="text-xs text-t3 truncate">{item.artist}</p>
+                    <p className="text-xs text-t3 truncate">
+                      {item.artist}
+                      {item.addedByUsername ? ` - added by ${item.addedByUsername}` : ''}
+                    </p>
                   </div>
                   <span className="text-xs text-t3 flex-shrink-0 font-mono">{formatDuration(Number(item.durationMs || 0))}</span>
                   {canRemove && (
-                    <button onClick={() => onRemoveFromQueue(item.id)} className="opacity-0 group-hover:opacity-100 text-t3 hover:text-t1 transition-opacity text-sm leading-none">
+                    <button onClick={() => { triggerHaptic(); onRemoveFromQueue(item.id); }} className="opacity-0 group-hover:opacity-100 text-t3 hover:text-t1 transition-opacity text-sm leading-none">
                       x
                     </button>
                   )}
@@ -237,6 +306,21 @@ export default function Queue({ onAddToQueue, onRemoveFromQueue, onReorderQueue,
           )}
         </AnimatePresence>
       </div>
+
+      <AnimatePresence>
+        {menuTargetId && isHostOrDj && (
+          <motion.div
+            initial={{ opacity: 0, y: 8 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: 8 }}
+            className="absolute left-3 right-3 bottom-3 z-40 bg-surface/95 border border-[var(--border)] rounded-xl p-2 flex items-center gap-2 shadow-2xl"
+          >
+            <button onClick={() => handleMenuAction('next')} className="flex-1 text-xs px-2 py-2 rounded-lg bg-elevated text-t2">Play next</button>
+            <button onClick={() => handleMenuAction('top')} className="flex-1 text-xs px-2 py-2 rounded-lg bg-elevated text-t2">Move top</button>
+            <button onClick={() => handleMenuAction('remove')} className="flex-1 text-xs px-2 py-2 rounded-lg bg-elevated text-red-300">Remove</button>
+          </motion.div>
+        )}
+      </AnimatePresence>
     </div>
   );
 }

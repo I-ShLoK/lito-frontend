@@ -4,7 +4,7 @@ import { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useRouter, useParams } from 'next/navigation';
 import toast from 'react-hot-toast';
-import { useStore } from '@/store';
+import { useStore, QueueItem } from '@/store';
 import { useSocket } from '@/hooks/useSocket';
 import { useAudio } from '@/hooks/useAudio';
 import Queue from '@/components/Queue';
@@ -63,6 +63,24 @@ function canonicalSongKey(title: string, artist?: string): string {
   const a = strip(artist || '');
   // Deduplicate across different channels uploading the same song.
   return `${t.slice(0, 80)}::${a.split(' ')[0] || ''}`;
+}
+
+function tokenizedTitle(title: string): Set<string> {
+  const cleaned = title
+    .toLowerCase()
+    .replace(/\[[^\]]*\]|\([^)]+\)/g, ' ')
+    .replace(/\b(official|video|lyric|lyrics|audio|full song|reaction|teaser|trailer|4k|hd|visualizer|remaster(ed)?|version|shorts?|feat|ft)\b/g, ' ')
+    .replace(/[^a-z0-9\u0900-\u0d7f]+/gi, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+  return new Set(cleaned.split(' ').filter((x) => x.length > 2));
+}
+
+function tokenOverlap(a: Set<string>, b: Set<string>): number {
+  if (!a.size || !b.size) return 0;
+  let inter = 0;
+  a.forEach((v) => { if (b.has(v)) inter += 1; });
+  return inter / Math.max(a.size, b.size);
 }
 
 function isLikelyMusicResult(item: Suggestion): boolean {
@@ -128,14 +146,37 @@ function SearchResultsPanel({
   query,
   onQueryChange,
   onAddToQueue,
+  recentKey,
 }: {
   query: string;
   onQueryChange: (query: string) => void;
   onAddToQueue: (item: { youtubeId: string; title: string; artist: string; durationMs: number; thumbnailUrl: string; mode: 'next' | 'end' }) => void;
+  recentKey: string;
 }) {
   const [loading, setLoading] = useState(false);
   const [results, setResults] = useState<Suggestion[]>([]);
   const [playlistMode, setPlaylistMode] = useState(false);
+  const [recentSearches, setRecentSearches] = useState<string[]>([]);
+
+  const pushRecentSearch = useCallback((text: string) => {
+    const value = text.trim();
+    if (!value || typeof window === 'undefined') return;
+    setRecentSearches((prev) => {
+      const next = [value, ...prev.filter((x) => x.toLowerCase() !== value.toLowerCase())].slice(0, 10);
+      window.localStorage.setItem(recentKey, JSON.stringify(next));
+      return next;
+    });
+  }, [recentKey]);
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    try {
+      const parsed = JSON.parse(window.localStorage.getItem(recentKey) || '[]');
+      if (Array.isArray(parsed)) setRecentSearches(parsed.filter((x) => typeof x === 'string').slice(0, 10));
+    } catch {
+      setRecentSearches([]);
+    }
+  }, [recentKey]);
 
   useEffect(() => {
     const q = query.trim();
@@ -149,6 +190,7 @@ function SearchResultsPanel({
       setLoading(true);
       try {
         if (isPlaylistLink(q)) {
+          pushRecentSearch(q);
           const importRes = await api.post('/api/music/import-playlist', { url: q });
           setPlaylistMode(true);
           setResults((importRes.data || []) as Suggestion[]);
@@ -157,6 +199,7 @@ function SearchResultsPanel({
 
         const youtubeId = extractYouTubeId(q);
         if (youtubeId) {
+          pushRecentSearch(q);
           setPlaylistMode(false);
           const infoRes = await api.get(`/api/audio/info/${youtubeId}`);
           setResults([{
@@ -167,6 +210,7 @@ function SearchResultsPanel({
             thumbnailUrl: String(infoRes.data?.thumbnailUrl || `https://i.ytimg.com/vi/${youtubeId}/hqdefault.jpg`),
           }]);
         } else {
+          pushRecentSearch(q);
           setPlaylistMode(false);
           const res = await api.get(`/api/music/search?q=${encodeURIComponent(q)}`);
           setResults((res.data || []) as Suggestion[]);
@@ -177,10 +221,10 @@ function SearchResultsPanel({
       } finally {
         setLoading(false);
       }
-    }, 250);
+    }, 300);
 
     return () => clearTimeout(t);
-  }, [query]);
+  }, [query, pushRecentSearch]);
 
   if (loading) {
     return (
@@ -215,12 +259,42 @@ function SearchResultsPanel({
         </div>
       </div>
       {!query.trim() ? (
-        <div className="px-4 py-6 text-sm text-t3">Search from here to add songs to queue instantly.</div>
+        <div className="px-4 py-5 space-y-3">
+          <p className="text-sm text-t3">Search from here to add songs to queue instantly.</p>
+          {recentSearches.length > 0 && (
+            <div>
+              <div className="flex items-center justify-between mb-2">
+                <p className="text-[11px] uppercase tracking-wider text-t3">Recent</p>
+                <button
+                  className="text-xs text-t3 hover:text-t1"
+                  onClick={() => {
+                    setRecentSearches([]);
+                    if (typeof window !== 'undefined') window.localStorage.removeItem(recentKey);
+                  }}
+                >
+                  Clear
+                </button>
+              </div>
+              <div className="flex flex-wrap gap-2">
+                {recentSearches.map((s) => (
+                  <button
+                    key={s}
+                    onClick={() => onQueryChange(s)}
+                    className="px-3 py-1.5 rounded-full bg-elevated text-xs text-t2 border border-[var(--border)] hover:text-t1"
+                  >
+                    {s}
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
+        </div>
       ) : (
         <div className="overflow-y-auto h-full p-2 space-y-1">
           {playlistMode && results.length > 0 && (
             <button
               onClick={() => {
+                pushRecentSearch(query);
                 results.forEach((r) => onAddToQueue({
                   youtubeId: r.id,
                   title: r.title,
@@ -335,6 +409,9 @@ function RecommendationsPanel({
     const cleanTitle = currentTrack.title.split('|')[0].trim();
     const mainArtist = (currentTrack.artist || '').split(',')[0].trim();
     const langHint = detectLanguageHint(`${currentTrack.artist} ${cleanTitle}`);
+    const currentCanon = canonicalSongKey(cleanTitle, mainArtist);
+    const currentTokens = tokenizedTitle(cleanTitle);
+    const queueCanon = new Set(queue.map((q) => canonicalSongKey(q.title, q.artist)));
 
     const queries = [
       `${mainArtist} ${cleanTitle} similar songs ${langHint}`,
@@ -353,8 +430,10 @@ function RecommendationsPanel({
         const seenCanon = new Set<string>();
         const out = merged.filter((r) => {
           const key = canonicalSongKey(r?.title || '', r?.artist || '');
+          const overlap = tokenOverlap(currentTokens, tokenizedTitle(r?.title || ''));
           const noisy = /reaction|review|status|shorts?/i.test(`${r?.title || ''} ${r?.artist || ''}`);
-          if (!r?.id || seenIds.has(r.id) || r.id === currentTrack.youtubeId || seenCanon.has(key) || noisy) return false;
+          const sameAsCurrent = key === currentCanon || overlap > 0.68;
+          if (!r?.id || seenIds.has(r.id) || r.id === currentTrack.youtubeId || seenCanon.has(key) || queueCanon.has(key) || sameAsCurrent || noisy) return false;
           seenIds.add(r.id);
           seenCanon.add(key);
           return true;
@@ -362,7 +441,7 @@ function RecommendationsPanel({
         setResults(out.slice(0, 12));
       })
       .finally(() => setLoading(false));
-  }, [currentTrack, roomArtists, detectLanguageHint]);
+  }, [currentTrack, queue, roomArtists, detectLanguageHint]);
 
   if (!currentTrack) return <div className="p-4 text-sm text-t3">Play something to get recommendations.</div>;
   if (loading) return <div className="p-3 space-y-2">{Array.from({ length: 6 }).map((_, i) => <div key={i} className="skeleton h-14 rounded-xl" />)}</div>;
@@ -517,6 +596,8 @@ function PlayerCore({
   onSkipNext,
   onShuffle,
   onToggleLoop,
+  volume,
+  onVolumeChange,
 }: {
   isHostOrDj: boolean;
   seekValue: number;
@@ -528,6 +609,8 @@ function PlayerCore({
   onSkipNext: () => void;
   onShuffle: () => void;
   onToggleLoop: () => void;
+  volume: number;
+  onVolumeChange: (value: number) => void;
 }) {
   const { currentTrack, playbackState } = useStore();
 
@@ -573,6 +656,20 @@ function PlayerCore({
           <button onClick={onSkipNext} disabled={!isHostOrDj} className="p-2 text-t2 disabled:opacity-30">⏭</button>
           <button onClick={onShuffle} disabled={!isHostOrDj} className="p-2 text-t3 disabled:opacity-30">↺</button>
         </div>
+
+        <div className="mt-4 px-2 flex items-center gap-2">
+          <span className="text-xs text-t3">Vol</span>
+          <input
+            type="range"
+            min={0}
+            max={1}
+            step={0.01}
+            value={volume}
+            onChange={(e) => onVolumeChange(Number(e.target.value))}
+            className="w-full h-1.5 accent-[var(--accent)] cursor-pointer"
+          />
+          <span className="text-[11px] text-t3 w-9 text-right">{Math.round(volume * 100)}%</span>
+        </div>
       </div>
   );
 }
@@ -602,6 +699,7 @@ export default function RoomPage() {
   const [desktopSearchQuery, setDesktopSearchQuery] = useState('');
   const [unreadChatCount, setUnreadChatCount] = useState(0);
   const [homeLanguage, setHomeLanguage] = useState<HomeLanguage>('english');
+  const [volume, setVolume] = useState(0.92);
 
   const touchStartXRef = useRef<number | null>(null);
   const warnedLastTrackRef = useRef<string | null>(null);
@@ -614,9 +712,10 @@ export default function RoomPage() {
     play, pause, seek, skipNext, skipPrev,
     shuffleQueue, toggleLoop, sendChat, toggleDjMode, trackEnded, syncRequest,
     addToQueue, removeFromQueue, reorderQueue,
+    connectionState,
   } = useSocket();
 
-  useAudio({ isHost, djMode, timeOffsetRef, onTrackEnded: trackEnded, onPlay: play, onPause: pause });
+  useAudio({ isHost, djMode, volume, timeOffsetRef, onTrackEnded: trackEnded, onPlay: play, onPause: pause });
 
   useEffect(() => {
     if (!token) { router.replace('/'); return; }
@@ -685,18 +784,52 @@ export default function RoomPage() {
     if (!draggingSeek) setSeekValue(localPositionMs);
   }, [localPositionMs, draggingSeek]);
 
+  const triggerHaptic = useCallback((pattern: number | number[] = 10) => {
+    if (typeof navigator !== 'undefined' && typeof navigator.vibrate === 'function') {
+      navigator.vibrate(pattern);
+    }
+  }, []);
+
   useEffect(() => {
     if (typeof window === 'undefined') return;
     const saved = window.localStorage.getItem('lito-home-language') as HomeLanguage | null;
     if (saved && HOME_LANGUAGES.includes(saved)) {
       setHomeLanguage(saved);
     }
+    const savedVolume = Number(window.localStorage.getItem('lito-pref-volume') || '0.92');
+    if (!Number.isNaN(savedVolume)) setVolume(Math.max(0, Math.min(1, savedVolume)));
+    const savedMobileTab = window.localStorage.getItem('lito-pref-mobile-tab');
+    if (savedMobileTab === 'room' || savedMobileTab === 'player' || savedMobileTab === 'chat') setMobileTab(savedMobileTab);
+    const savedPlayerPanel = window.localStorage.getItem('lito-pref-mobile-player-panel');
+    if (savedPlayerPanel === 'search' || savedPlayerPanel === 'recommendations' || savedPlayerPanel === 'queue') setMobilePlayerPanel(savedPlayerPanel);
+    const savedDesktopLeft = window.localStorage.getItem('lito-pref-desktop-left');
+    if (savedDesktopLeft === 'queue' || savedDesktopLeft === 'search' || savedDesktopLeft === 'recommendations') setDesktopLeftTab(savedDesktopLeft);
   }, []);
 
   useEffect(() => {
     if (typeof window === 'undefined') return;
     window.localStorage.setItem('lito-home-language', homeLanguage);
   }, [homeLanguage]);
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    window.localStorage.setItem('lito-pref-volume', String(volume));
+  }, [volume]);
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    window.localStorage.setItem('lito-pref-mobile-tab', mobileTab);
+  }, [mobileTab]);
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    window.localStorage.setItem('lito-pref-mobile-player-panel', mobilePlayerPanel);
+  }, [mobilePlayerPanel]);
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    window.localStorage.setItem('lito-pref-desktop-left', desktopLeftTab);
+  }, [desktopLeftTab]);
 
   useEffect(() => {
     const currentId = currentTrack?.youtubeId;
@@ -754,6 +887,53 @@ export default function RoomPage() {
   }, [isMobile]);
 
   useEffect(() => {
+    if (typeof window === 'undefined') return;
+    if (isMobile && !window.localStorage.getItem('lito-tip-swipe-tabs')) {
+      toast('Tip: swipe left or right to switch Room / Player / Chat.', { duration: 3600 });
+      window.localStorage.setItem('lito-tip-swipe-tabs', '1');
+    }
+    if (isHostOrDj && !window.localStorage.getItem('lito-tip-queue-drag')) {
+      toast('Tip: drag queue rows to reorder instantly.', { duration: 3200 });
+      window.localStorage.setItem('lito-tip-queue-drag', '1');
+    }
+    if (!window.localStorage.getItem('lito-tip-playlist-import')) {
+      toast('Tip: paste YouTube/Spotify playlist links in search to import.', { duration: 3400 });
+      window.localStorage.setItem('lito-tip-playlist-import', '1');
+    }
+  }, [isMobile, isHostOrDj]);
+
+  useEffect(() => {
+    if (isMobile) return;
+    const onKey = (e: KeyboardEvent) => {
+      const target = e.target as HTMLElement | null;
+      if (target && (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable)) return;
+      if (!isHostOrDj) return;
+
+      if (e.code === 'Space') {
+        e.preventDefault();
+        triggerHaptic();
+        if (playbackState.isPlaying) pause(localPositionMs);
+        else play(localPositionMs);
+      } else if (e.key === 'ArrowRight') {
+        e.preventDefault();
+        seek(Math.min((currentTrack?.durationMs || 0), localPositionMs + 5000));
+      } else if (e.key === 'ArrowLeft') {
+        e.preventDefault();
+        seek(Math.max(0, localPositionMs - 5000));
+      } else if (e.key.toLowerCase() === 'n') {
+        e.preventDefault();
+        skipNext();
+      } else if (e.key.toLowerCase() === 'p') {
+        e.preventDefault();
+        skipPrev();
+      }
+    };
+
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [isMobile, isHostOrDj, playbackState.isPlaying, localPositionMs, currentTrack?.durationMs, play, pause, seek, skipNext, skipPrev, triggerHaptic]);
+
+  useEffect(() => {
     const previous = prevMessageCountRef.current;
     const next = messages.length;
     if (next > previous) {
@@ -777,10 +957,53 @@ export default function RoomPage() {
     router.push('/browse');
   };
 
-  const onPlay = () => play(localPositionMs);
-  const onPause = () => pause(localPositionMs);
+  const onPlay = () => {
+    triggerHaptic();
+    play(localPositionMs);
+  };
+  const onPause = () => {
+    triggerHaptic();
+    pause(localPositionMs);
+  };
+  const onSkipPrevAction = () => {
+    triggerHaptic(12);
+    skipPrev();
+  };
+  const onSkipNextAction = () => {
+    triggerHaptic(12);
+    skipNext();
+  };
+  const onShuffleAction = () => {
+    triggerHaptic(12);
+    shuffleQueue();
+  };
+  const onToggleLoopAction = () => {
+    triggerHaptic(10);
+    toggleLoop();
+  };
   const addToQueueFromSearch = (item: { youtubeId: string; title: string; artist: string; durationMs: number; thumbnailUrl: string; mode: 'next' | 'end' }) => {
+    const optimistic: QueueItem = {
+      id: `optimistic-${Date.now()}-${Math.random().toString(16).slice(2, 8)}`,
+      position: queue.length,
+      votes: 0,
+      addMode: item.mode,
+      addedBy: userId,
+      addedByUsername: useStore.getState().username || 'you',
+      trackId: item.youtubeId,
+      youtubeId: item.youtubeId,
+      title: item.title,
+      artist: item.artist,
+      durationMs: item.durationMs,
+      thumbnailUrl: item.thumbnailUrl,
+    };
+    const currentQueue = useStore.getState().queue;
+    const nextQueue = [...currentQueue];
+    if (item.mode === 'next') nextQueue.splice(Math.min(1, nextQueue.length), 0, optimistic);
+    else nextQueue.push(optimistic);
+    setQueue(nextQueue);
+
     addToQueue(item);
+    triggerHaptic(14);
     toast.success(`Added to queue: ${item.title}`, { duration: 2200 });
   };
 
@@ -793,7 +1016,7 @@ export default function RoomPage() {
     const onSwipeEnd = (x: number) => {
       if (touchStartXRef.current === null) return;
       const deltaX = x - touchStartXRef.current;
-      if (Math.abs(deltaX) < 90) return;
+      if (Math.abs(deltaX) < 140) return;
       if (deltaX < 0 && currentIndex < tabOrder.length - 1) setMobileTab(tabOrder[currentIndex + 1]);
       if (deltaX > 0 && currentIndex > 0) setMobileTab(tabOrder[currentIndex - 1]);
     };
@@ -823,6 +1046,7 @@ export default function RoomPage() {
               <button
                 key={tab.id}
                 onClick={() => {
+                  triggerHaptic();
                   setMobileTab(tab.id);
                   if (tab.id === 'chat') setUnreadChatCount(0);
                   if (tab.id === 'room') setMobileRoomPanel('home');
@@ -841,6 +1065,12 @@ export default function RoomPage() {
             </div>
             <div className="shrink-0"><InstallAppButton compact /></div>
           </div>
+          <div className="px-1">
+            <div className="inline-flex items-center gap-2 text-[11px] text-t3">
+              <span className={`inline-block w-2 h-2 rounded-full ${connectionState === 'synced' ? 'bg-emerald-400' : 'bg-amber-400 animate-pulse'}`} />
+              {connectionState === 'synced' ? 'Synced' : 'Reconnecting'}
+            </div>
+          </div>
 
           <AnimatePresence mode="wait">
             {mobileTab === 'room' && (
@@ -856,7 +1086,7 @@ export default function RoomPage() {
                   </div>
                 </div>
                 <button
-                  onClick={() => setMobileRoomPanel('listeners')}
+                  onClick={() => { triggerHaptic(); setMobileRoomPanel('listeners'); }}
                   className="mx-3 mb-2 px-2 py-2 rounded-xl bg-elevated/60 border border-[var(--border)] flex items-center justify-between"
                 >
                   <div className="flex -space-x-2 items-center overflow-hidden">
@@ -874,7 +1104,7 @@ export default function RoomPage() {
                     <div className="h-full min-h-0 flex flex-col">
                       <div className="px-3 pb-2">
                         <button
-                          onClick={() => setMobileRoomPanel('home')}
+                          onClick={() => { triggerHaptic(); setMobileRoomPanel('home'); }}
                           className="text-xs px-3 py-1.5 rounded-lg bg-elevated text-t2"
                         >
                           ← Back to Home
@@ -902,22 +1132,24 @@ export default function RoomPage() {
                       onSeekCommit={handleSeekCommit}
                       onPlay={onPlay}
                       onPause={onPause}
-                      onSkipPrev={skipPrev}
-                      onSkipNext={skipNext}
-                      onShuffle={shuffleQueue}
-                      onToggleLoop={toggleLoop}
+                      onSkipPrev={onSkipPrevAction}
+                      onSkipNext={onSkipNextAction}
+                      onShuffle={onShuffleAction}
+                      onToggleLoop={onToggleLoopAction}
+                      volume={volume}
+                      onVolumeChange={setVolume}
                     />
                   </div>
 
                   <div className="px-3 pb-3">
                     <div className="apple-glass glow-accent rounded-[24px] px-4 py-2 flex items-center justify-around">
-                      <button onClick={() => setMobilePlayerPanel('search')} className={`h-11 w-11 rounded-2xl flex items-center justify-center ${mobilePlayerPanel === 'search' ? 'bg-accent text-bg shadow-[0_10px_30px_rgba(255,255,255,0.22)]' : 'text-t2'}`} aria-label="Search">
+                      <button onClick={() => { triggerHaptic(); setMobilePlayerPanel('search'); }} className={`h-11 w-11 rounded-2xl flex items-center justify-center ${mobilePlayerPanel === 'search' ? 'bg-accent text-bg shadow-[0_10px_30px_rgba(255,255,255,0.22)]' : 'text-t2'}`} aria-label="Search">
                         <SearchIcon />
                       </button>
-                      <button onClick={() => setMobilePlayerPanel('recommendations')} className={`h-11 w-11 rounded-2xl flex items-center justify-center ${mobilePlayerPanel === 'recommendations' ? 'bg-accent text-bg shadow-[0_10px_30px_rgba(255,255,255,0.22)]' : 'text-t2'}`} aria-label="Recommendations">
+                      <button onClick={() => { triggerHaptic(); setMobilePlayerPanel('recommendations'); }} className={`h-11 w-11 rounded-2xl flex items-center justify-center ${mobilePlayerPanel === 'recommendations' ? 'bg-accent text-bg shadow-[0_10px_30px_rgba(255,255,255,0.22)]' : 'text-t2'}`} aria-label="Recommendations">
                         <RecommendIcon />
                       </button>
-                      <button onClick={() => setMobilePlayerPanel('queue')} className={`h-11 w-11 rounded-2xl flex items-center justify-center ${mobilePlayerPanel === 'queue' ? 'bg-accent text-bg shadow-[0_10px_30px_rgba(255,255,255,0.22)]' : 'text-t2'}`} aria-label="Queue">
+                      <button onClick={() => { triggerHaptic(); setMobilePlayerPanel('queue'); }} className={`h-11 w-11 rounded-2xl flex items-center justify-center ${mobilePlayerPanel === 'queue' ? 'bg-accent text-bg shadow-[0_10px_30px_rgba(255,255,255,0.22)]' : 'text-t2'}`} aria-label="Queue">
                         <QueueIcon />
                       </button>
                     </div>
@@ -929,11 +1161,19 @@ export default function RoomPage() {
                         query={mobileSearchQuery}
                         onQueryChange={setMobileSearchQuery}
                         onAddToQueue={addToQueueFromSearch}
+                        recentKey="lito-recent-searches-mobile"
                       />
                     )}
-                    {mobilePlayerPanel === 'recommendations' && <RecommendationsPanel onAddToQueue={addToQueue} />}
+                    {mobilePlayerPanel === 'recommendations' && <RecommendationsPanel onAddToQueue={addToQueueFromSearch} />}
                     {mobilePlayerPanel === 'queue' && (
-                      <Queue onAddToQueue={addToQueue} onRemoveFromQueue={removeFromQueue} onReorderQueue={reorderQueue} isHostOrDj={isHostOrDj} showSearch={false} />
+                      <Queue
+                        onAddToQueue={addToQueue}
+                        onRemoveFromQueue={(id) => { triggerHaptic(10); removeFromQueue(id); }}
+                        onReorderQueue={reorderQueue}
+                        isHostOrDj={isHostOrDj}
+                        showSearch={false}
+                        onRequestSearch={() => setMobilePlayerPanel('search')}
+                      />
                     )}
                   </div>
                 </div>
@@ -966,6 +1206,10 @@ export default function RoomPage() {
             <p className="text-xs text-t3">Synchronized room playback</p>
           </div>
           <div className="flex items-center gap-2">
+            <div className="inline-flex items-center gap-2 text-xs text-t3 mr-1">
+              <span className={`inline-block w-2 h-2 rounded-full ${connectionState === 'synced' ? 'bg-emerald-400' : 'bg-amber-400 animate-pulse'}`} />
+              {connectionState === 'synced' ? 'Synced' : 'Reconnecting'}
+            </div>
             <InstallAppButton compact />
             {isHost && <button onClick={toggleDjMode} className="px-3 py-1.5 rounded-lg bg-elevated text-t2">DJ Mode</button>}
             <button onClick={handleLeave} className="px-3 py-1.5 rounded-lg bg-elevated text-t2">Leave</button>
@@ -1002,16 +1246,24 @@ export default function RoomPage() {
             </div>
             <div className="flex-1 min-h-0 overflow-hidden">
               {desktopLeftTab === 'queue' && (
-                <Queue onAddToQueue={addToQueue} onRemoveFromQueue={removeFromQueue} onReorderQueue={reorderQueue} isHostOrDj={isHostOrDj} showSearch={false} />
+                <Queue
+                  onAddToQueue={addToQueue}
+                  onRemoveFromQueue={(id) => removeFromQueue(id)}
+                  onReorderQueue={reorderQueue}
+                  isHostOrDj={isHostOrDj}
+                  showSearch={false}
+                  onRequestSearch={() => setDesktopLeftTab('search')}
+                />
               )}
               {desktopLeftTab === 'search' && (
                 <SearchResultsPanel
                   query={desktopSearchQuery}
                   onQueryChange={setDesktopSearchQuery}
                   onAddToQueue={addToQueueFromSearch}
+                  recentKey="lito-recent-searches-desktop"
                 />
               )}
-              {desktopLeftTab === 'recommendations' && <RecommendationsPanel onAddToQueue={addToQueue} />}
+              {desktopLeftTab === 'recommendations' && <RecommendationsPanel onAddToQueue={addToQueueFromSearch} />}
             </div>
           </div>
 
@@ -1023,10 +1275,12 @@ export default function RoomPage() {
               onSeekCommit={handleSeekCommit}
               onPlay={onPlay}
               onPause={onPause}
-              onSkipPrev={skipPrev}
-              onSkipNext={skipNext}
-              onShuffle={shuffleQueue}
-              onToggleLoop={toggleLoop}
+              onSkipPrev={onSkipPrevAction}
+              onSkipNext={onSkipNextAction}
+              onShuffle={onShuffleAction}
+              onToggleLoop={onToggleLoopAction}
+              volume={volume}
+              onVolumeChange={setVolume}
             />
           </div>
 

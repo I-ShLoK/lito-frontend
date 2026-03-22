@@ -8,6 +8,7 @@ const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3011';
 interface UseAudioOptions {
   isHost: boolean;
   djMode: boolean;
+  volume: number;
   timeOffsetRef: React.MutableRefObject<number>;
   onTrackEnded: (endedTrackId?: string) => void;
   onPlay: (positionMs: number) => void;
@@ -17,6 +18,7 @@ interface UseAudioOptions {
 export function useAudio({
   isHost,
   djMode,
+  volume,
   timeOffsetRef,
   onTrackEnded,
   onPlay,
@@ -50,6 +52,12 @@ export function useAudio({
       if (startFallbackTimeoutRef.current) clearTimeout(startFallbackTimeoutRef.current);
     };
   }, []);
+
+  useEffect(() => {
+    const audio = audioRef.current;
+    if (!audio) return;
+    audio.volume = Math.min(1, Math.max(0, volume));
+  }, [volume]);
 
   // Load track when it changes; always start fresh and recover on slow readiness
   useEffect(() => {

@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useRef, useCallback } from 'react';
+import { useEffect, useRef, useCallback, useState } from 'react';
 import { io, Socket } from 'socket.io-client';
 import toast from 'react-hot-toast';
 import { useStore, Track, QueueItem, Participant, Message, PlaybackState } from '@/store';
@@ -39,6 +39,7 @@ export function useSocket() {
 
   const timeOffsetRef = useRef(0);
   const syncIntervalRef = useRef<NodeJS.Timeout | null>(null);
+  const [connectionState, setConnectionState] = useState<'synced' | 'reconnecting'>('reconnecting');
 
   // Run NTP sync N times, keep the sample with lowest RTT for best accuracy
   const doNtpSync = useCallback((socket: Socket, samples = 3) => {
@@ -100,10 +101,19 @@ export function useSocket() {
 
     socket.on('connect', () => {
       console.log('Socket connected');
+      setConnectionState('synced');
       if (roomId) {
         socket.emit('JOIN_ROOM', { roomId });
         doNtpSync(socket, 5);
       }
+    });
+
+    socket.on('disconnect', () => {
+      setConnectionState('reconnecting');
+    });
+
+    socket.on('connect_error', () => {
+      setConnectionState('reconnecting');
     });
 
     socket.on('ROOM_STATE', ({ playbackState, queue, participants, djMode }: {
@@ -211,6 +221,8 @@ export function useSocket() {
       socket.off('TOGGLE_DJ_MODE');
       socket.off('TRACK_UNPLAYABLE');
       socket.off('ERROR');
+      socket.off('disconnect');
+      socket.off('connect_error');
     };
   }, [token, roomId, getSocket, setQueue, setCurrentTrack, setPlaybackState,
       addMessage, setParticipants, setDjMode, markTrackUnplayable,
@@ -278,6 +290,7 @@ export function useSocket() {
     skipNext, skipPrev, shuffleQueue, toggleLoop, sendChat,
     toggleDjMode, trackEnded, syncRequest,
     addToQueue, removeFromQueue, reorderQueue,
+    connectionState,
     emit,
   };
 }
