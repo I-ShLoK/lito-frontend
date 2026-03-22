@@ -583,7 +583,7 @@ function RoomHomePanel({
 
     setLoading(true);
     Promise.all(queries.map((q) => api.get(`/api/music/search?q=${encodeURIComponent(q)}`).then((r) => r.data).catch(() => [])))
-      .then((lists) => {
+      .then(async (lists) => {
         if (!mounted) return;
         const merged = lists.flat() as Suggestion[];
         const seenLocal = new Set<string>();
@@ -600,6 +600,29 @@ function RoomHomePanel({
           deduped = merged.filter((x) => {
             const key = canonicalSongKey(x.title || '', x.artist || '');
             if (!x?.id || !isLikelyMusicResult(x) || seenLocal.has(key)) return false;
+            seenLocal.add(key);
+            return true;
+          });
+        }
+
+        if (deduped.length === 0) {
+          // Hard fallback to known music-label seeds so home never appears empty.
+          const fallbackSeeds: Record<HomeLanguage, string[]> = {
+            english: ['vevo official audio', 'warner records official songs', 'universal music official songs'],
+            telugu: ['aditya music telugu songs', 'lahari music telugu', 'saregama telugu official songs'],
+            hindi: ['t-series official songs', 'zee music official songs', 'saregama hindi official songs'],
+            tamil: ['sony music south tamil songs', 'think music india tamil', 'saregama tamil official songs'],
+            punjabi: ['speed records official songs', 'tips punjabi songs', 'white hill music official songs'],
+            malayalam: ['muzik247 malayalam songs', 'satyam audios official songs', 'manorama music malayalam'],
+          };
+          const fallbackQueries = fallbackSeeds[language].slice(0, compact ? 2 : 3);
+          const fallbackLists = await Promise.all(
+            fallbackQueries.map((q) => api.get(`/api/music/search?q=${encodeURIComponent(q)}`).then((r) => r.data).catch(() => []))
+          );
+          const fallbackMerged = fallbackLists.flat() as Suggestion[];
+          deduped = fallbackMerged.filter((x) => {
+            const key = canonicalSongKey(x.title || '', x.artist || '');
+            if (!x?.id || seenLocal.has(key)) return false;
             seenLocal.add(key);
             return true;
           });
