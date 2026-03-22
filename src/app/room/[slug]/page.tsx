@@ -168,14 +168,6 @@ function TopBackIcon() {
   );
 }
 
-function ThemeIcon() {
-  return (
-    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
-      <path d="M21 12.8A9 9 0 1 1 11.2 3 7 7 0 0 0 21 12.8z" />
-    </svg>
-  );
-}
-
 function RecommendationsPanel({
   onAddToQueue,
 }: {
@@ -292,8 +284,7 @@ function PlayerCore({
   const { currentTrack, playbackState } = useStore();
 
   return (
-    <div className="glass rounded-3xl p-4 border border-[var(--border)]">
-      <div className="mx-auto max-w-md">
+    <div className="mx-auto max-w-md">
         <div className="aspect-square rounded-2xl overflow-hidden bg-elevated mb-4 shadow-2xl">
           {currentTrack?.thumbnailUrl
             ? <Thumb src={currentTrack.thumbnailUrl} alt={currentTrack.title} className="w-full h-full object-cover" />
@@ -335,7 +326,6 @@ function PlayerCore({
           <div className="w-6" />
         </div>
       </div>
-    </div>
   );
 }
 
@@ -350,7 +340,6 @@ export default function RoomPage() {
     currentTrack, localPositionMs,
     setRoom, clearRoom, setCurrentTrack, setPlaybackState,
     setQueue, setParticipants, setDjMode, addMessage,
-    toggleTheme,
   } = useStore();
 
   const [loading, setLoading] = useState(true);
@@ -482,20 +471,11 @@ export default function RoomPage() {
           onTouchStart={(e) => { touchStartXRef.current = e.changedTouches[0].clientX; }}
           onTouchEnd={(e) => onSwipeEnd(e.changedTouches[0].clientX)}
         >
-          <div className="apple-glass rounded-2xl px-3 py-2 flex items-center justify-between">
-            <button onClick={() => router.push('/browse')} className="text-t2 p-2 rounded-xl bg-elevated/70">
+          <div className="flex items-center gap-2">
+            <button onClick={() => router.push('/browse')} className="h-11 w-11 rounded-2xl apple-glass flex items-center justify-center text-t2 shrink-0">
               <TopBackIcon />
             </button>
-            <div />
-            <div className="flex items-center gap-2">
-              <InstallAppButton compact />
-              <button onClick={toggleTheme} className="text-t2 p-2 rounded-xl bg-elevated/70">
-                <ThemeIcon />
-              </button>
-            </div>
-          </div>
-
-          <div className="apple-glass glow-accent rounded-[28px] px-2 py-1.5 grid grid-cols-3 gap-2">
+            <div className="apple-glass glow-accent rounded-[28px] px-2 py-1.5 grid grid-cols-3 gap-2 flex-1">
             {([
               { id: 'room', label: 'Room', icon: <TopRoomIcon /> },
               { id: 'player', label: 'Player', icon: <TopPlayerIcon /> },
@@ -505,17 +485,19 @@ export default function RoomPage() {
                 key={tab.id}
                 onClick={() => setMobileTab(tab.id)}
                 aria-label={tab.label}
-                className={`h-11 rounded-2xl flex items-center justify-center transition-all ${mobileTab === tab.id ? 'bg-accent text-bg shadow-[0_10px_30px_rgba(149,202,87,0.35)]' : 'text-t2 bg-white/[0.04]'}`}
+                className={`h-11 rounded-2xl flex items-center justify-center transition-all ${mobileTab === tab.id ? 'bg-accent text-bg shadow-[0_10px_30px_rgba(255,255,255,0.22)]' : 'text-t2 bg-white/[0.04]'}`}
               >
                 {tab.icon}
               </button>
             ))}
+            </div>
+            <div className="shrink-0"><InstallAppButton compact /></div>
           </div>
 
           <AnimatePresence mode="wait">
             {mobileTab === 'room' && (
-              <motion.div key="room" initial={{ opacity: 0, x: -12 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: 12 }} className="glass rounded-2xl h-[68vh] overflow-hidden flex flex-col">
-                <div className="px-4 py-3 border-b border-[var(--border)] flex items-center justify-between">
+              <motion.div key="room" initial={{ opacity: 0, x: -12 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: 12 }} className="apple-glass rounded-2xl h-[68vh] overflow-hidden flex flex-col">
+                <div className="px-4 py-3 flex items-center justify-between">
                   <div>
                     <p className="text-sm text-t1">{roomName}</p>
                     <p className="text-xs text-t3">Room details and listeners</p>
@@ -530,8 +512,8 @@ export default function RoomPage() {
             )}
 
             {mobileTab === 'player' && (
-              <motion.div key="player" initial={{ opacity: 0, x: -12 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: 12 }} className="space-y-3">
-                <div className="apple-glass rounded-2xl p-3">
+              <motion.div key="player" initial={{ opacity: 0, x: -12 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: 12 }} className="space-y-2">
+                <div className="apple-glass rounded-2xl px-3 py-2">
                   <PlayerCore
                     isHostOrDj={isHostOrDj}
                     seekValue={seekValue}
@@ -555,14 +537,14 @@ export default function RoomPage() {
                   )}
                   {mobilePlayerPanel === 'recommendations' && <RecommendationsPanel onAddToQueue={addToQueue} />}
                   {mobilePlayerPanel === 'queue' && (
-                    <Queue onAddToQueue={addToQueue} onRemoveFromQueue={removeFromQueue} onReorderQueue={reorderQueue} isHostOrDj={isHostOrDj} />
+                    <Queue onAddToQueue={addToQueue} onRemoveFromQueue={removeFromQueue} onReorderQueue={reorderQueue} isHostOrDj={isHostOrDj} showSearch={false} />
                   )}
                 </div>
               </motion.div>
             )}
 
             {mobileTab === 'chat' && (
-              <motion.div key="chat" initial={{ opacity: 0, x: -12 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: 12 }} className="glass rounded-2xl h-[68vh] overflow-hidden">
+              <motion.div key="chat" initial={{ opacity: 0, x: -12 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: 12 }} className="apple-glass rounded-2xl h-[68vh] overflow-hidden">
                 <Chat onSendMessage={sendChat} />
               </motion.div>
             )}
@@ -571,13 +553,13 @@ export default function RoomPage() {
 
         <div className="fixed bottom-0 inset-x-0 p-3 z-20">
           <div className="apple-glass glow-accent rounded-[28px] px-5 py-3 flex items-center justify-around">
-            <button onClick={() => { setMobileTab('player'); setMobilePlayerPanel('search'); }} className={`h-11 w-11 rounded-2xl flex items-center justify-center ${mobileTab === 'player' && mobilePlayerPanel === 'search' ? 'bg-accent text-bg shadow-[0_10px_30px_rgba(149,202,87,0.35)]' : 'text-t2'}`} aria-label="Search">
+            <button onClick={() => { setMobileTab('player'); setMobilePlayerPanel('search'); }} className={`h-11 w-11 rounded-2xl flex items-center justify-center ${mobileTab === 'player' && mobilePlayerPanel === 'search' ? 'bg-accent text-bg shadow-[0_10px_30px_rgba(255,255,255,0.22)]' : 'text-t2'}`} aria-label="Search">
               <SearchIcon />
             </button>
-            <button onClick={() => { setMobileTab('player'); setMobilePlayerPanel('recommendations'); }} className={`h-11 w-11 rounded-2xl flex items-center justify-center ${mobileTab === 'player' && mobilePlayerPanel === 'recommendations' ? 'bg-accent text-bg shadow-[0_10px_30px_rgba(149,202,87,0.35)]' : 'text-t2'}`} aria-label="Recommendations">
+            <button onClick={() => { setMobileTab('player'); setMobilePlayerPanel('recommendations'); }} className={`h-11 w-11 rounded-2xl flex items-center justify-center ${mobileTab === 'player' && mobilePlayerPanel === 'recommendations' ? 'bg-accent text-bg shadow-[0_10px_30px_rgba(255,255,255,0.22)]' : 'text-t2'}`} aria-label="Recommendations">
               <RecommendIcon />
             </button>
-            <button onClick={() => { setMobileTab('player'); setMobilePlayerPanel('queue'); }} className={`h-11 w-11 rounded-2xl flex items-center justify-center ${mobileTab === 'player' && mobilePlayerPanel === 'queue' ? 'bg-accent text-bg shadow-[0_10px_30px_rgba(149,202,87,0.35)]' : 'text-t2'}`} aria-label="Queue">
+            <button onClick={() => { setMobileTab('player'); setMobilePlayerPanel('queue'); }} className={`h-11 w-11 rounded-2xl flex items-center justify-center ${mobileTab === 'player' && mobilePlayerPanel === 'queue' ? 'bg-accent text-bg shadow-[0_10px_30px_rgba(255,255,255,0.22)]' : 'text-t2'}`} aria-label="Queue">
               <QueueIcon />
             </button>
           </div>
@@ -594,21 +576,20 @@ export default function RoomPage() {
       </div>
 
       <div className="relative z-[1] max-w-[1500px] mx-auto px-5 py-5">
-        <div className="glass rounded-2xl px-4 py-3 mb-4 flex items-center justify-between">
+        <div className="apple-glass rounded-2xl px-4 py-3 mb-4 flex items-center justify-between">
           <div>
             <h1 className="font-display text-2xl">{roomName}</h1>
             <p className="text-xs text-t3">Synchronized room playback</p>
           </div>
           <div className="flex items-center gap-2">
             <InstallAppButton compact />
-            <button onClick={toggleTheme} className="px-3 py-1.5 rounded-lg bg-elevated text-t2">Theme</button>
             {isHost && <button onClick={toggleDjMode} className="px-3 py-1.5 rounded-lg bg-elevated text-t2">DJ Mode</button>}
             <button onClick={handleLeave} className="px-3 py-1.5 rounded-lg bg-elevated text-t2">Leave</button>
           </div>
         </div>
 
         <div className="grid gap-4" style={{ gridTemplateColumns: '360px minmax(480px, 1fr) 360px' }}>
-          <div className="glass rounded-2xl overflow-hidden min-h-[78vh] flex flex-col">
+          <div className="apple-glass rounded-2xl overflow-hidden min-h-[78vh] flex flex-col">
             <div className="flex border-b border-[var(--border)]">
               {(['queue', 'recommendations'] as const).map((tab) => (
                 <button key={tab} onClick={() => setDesktopLeftTab(tab)} className={`flex-1 py-2.5 text-xs uppercase tracking-wider ${desktopLeftTab === tab ? 'text-accent border-b-2 border-accent' : 'text-t3'}`}>
@@ -618,12 +599,12 @@ export default function RoomPage() {
             </div>
             <div className="flex-1 min-h-0 overflow-hidden">
               {desktopLeftTab === 'queue'
-                ? <Queue onAddToQueue={addToQueue} onRemoveFromQueue={removeFromQueue} onReorderQueue={reorderQueue} isHostOrDj={isHostOrDj} />
+                ? <Queue onAddToQueue={addToQueue} onRemoveFromQueue={removeFromQueue} onReorderQueue={reorderQueue} isHostOrDj={isHostOrDj} showSearch={false} />
                 : <RecommendationsPanel onAddToQueue={addToQueue} />}
             </div>
           </div>
 
-          <div className="min-h-[78vh]">
+          <div className="min-h-[78vh] apple-glass rounded-2xl p-4">
             <PlayerCore
               isHostOrDj={isHostOrDj}
               seekValue={seekValue}
@@ -637,7 +618,7 @@ export default function RoomPage() {
             />
           </div>
 
-          <div className="glass rounded-2xl overflow-hidden min-h-[78vh] flex flex-col">
+          <div className="apple-glass rounded-2xl overflow-hidden min-h-[78vh] flex flex-col">
             <div className="flex border-b border-[var(--border)]">
               {(['chat', 'people'] as const).map((tab) => (
                 <button key={tab} onClick={() => setDesktopSocialTab(tab)} className={`flex-1 py-2.5 text-xs uppercase tracking-wider ${desktopSocialTab === tab ? 'text-accent border-b-2 border-accent' : 'text-t3'}`}>

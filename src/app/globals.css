@@ -7,35 +7,23 @@
 @tailwind utilities;
 
 :root {
-  --bg: #0b1113;
-  --surface: #121a1f;
-  --elevated: #1a242c;
-  --accent: #95ca57;
-  --accent-dim: #5f8746;
-  --text-1: #f1f6f7;
-  --text-2: #a8b4b8;
-  --text-3: #6f7d84;
-  --border: #24323b;
-  --radius: 16px;
-}
-
-[data-theme='mono'] {
-  --bg: #020303;
-  --surface: #0a0d0e;
-  --elevated: #111518;
+  --bg: #000000;
+  --surface: #060708;
+  --elevated: #0d0f11;
   --accent: #ffffff;
-  --accent-dim: #8a8a8a;
-  --text-1: #ffffff;
-  --text-2: #9a9a9a;
-  --text-3: #5a5a5a;
-  --border: #1b1f21;
+  --accent-dim: #9ca1a8;
+  --text-1: #f5f7fa;
+  --text-2: #c2c7cf;
+  --text-3: #7c828b;
+  --border: #20252b;
+  --radius: 16px;
 }
 
 *, *::before, *::after { box-sizing: border-box; }
 
 html {
-  background: radial-gradient(1200px 800px at 20% 0%, #12342f55 0%, transparent 60%),
-              radial-gradient(900px 600px at 90% 20%, #1a2f3555 0%, transparent 70%),
+  background: radial-gradient(1200px 800px at 20% 0%, #ffffff14 0%, transparent 60%),
+              radial-gradient(900px 600px at 90% 20%, #ffffff0c 0%, transparent 70%),
               var(--bg);
   color: var(--text-1);
   font-family: 'Satoshi', system-ui, sans-serif;
@@ -99,15 +87,15 @@ h1, h2, h3, .font-display { font-family: 'Clash Display', system-ui, sans-serif;
 
 .apple-glass {
   background:
-    linear-gradient(135deg, rgba(255, 255, 255, 0.09) 0%, rgba(255, 255, 255, 0.03) 38%, rgba(255, 255, 255, 0.01) 100%),
-    color-mix(in srgb, var(--surface) 74%, transparent);
-  backdrop-filter: blur(22px) saturate(135%);
-  -webkit-backdrop-filter: blur(22px) saturate(135%);
-  border: 1px solid color-mix(in srgb, #ffffff 16%, var(--border));
+    linear-gradient(140deg, rgba(255, 255, 255, 0.14) 0%, rgba(255, 255, 255, 0.05) 38%, rgba(255, 255, 255, 0.02) 100%),
+    color-mix(in srgb, var(--surface) 66%, transparent);
+  backdrop-filter: blur(28px) saturate(150%);
+  -webkit-backdrop-filter: blur(28px) saturate(150%);
+  border: 1px solid color-mix(in srgb, #ffffff 24%, var(--border));
   box-shadow:
-    0 18px 40px rgba(0, 0, 0, 0.28),
-    inset 0 1px 0 rgba(255, 255, 255, 0.2),
-    0 0 0 1px rgba(255, 255, 255, 0.04);
+    0 24px 45px rgba(0, 0, 0, 0.5),
+    inset 0 1px 0 rgba(255, 255, 255, 0.28),
+    0 0 0 1px rgba(255, 255, 255, 0.06);
 }
 
 .glow-accent {
@@ -119,7 +107,7 @@ h1, h2, h3, .font-display { font-family: 'Clash Display', system-ui, sans-serif;
   position: absolute;
   inset: -1px;
   border-radius: inherit;
-  background: radial-gradient(100% 80% at 50% 0%, rgba(149, 202, 87, 0.2), rgba(149, 202, 87, 0) 70%);
+  background: radial-gradient(100% 80% at 50% 0%, rgba(255, 255, 255, 0.22), rgba(255, 255, 255, 0) 72%);
   pointer-events: none;
 }
 
