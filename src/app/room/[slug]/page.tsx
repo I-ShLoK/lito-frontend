@@ -115,6 +115,19 @@ function isNoisyNonSong(title: string, artist: string): boolean {
   return /reaction|review|status|shorts?|interview|vlog|gameplay|car|truck|vs\b|news|prank|comedy|travel|transform|trailer/.test(s);
 }
 
+function isSameSongVariant(candidate: { title: string; artist: string }, current: { title: string; artist: string }): boolean {
+  const cTitle = (candidate.title || '').toLowerCase();
+  const pTitle = (current.title || '').toLowerCase();
+  const tokenScore = tokenOverlap(tokenizedTitle(candidate.title || ''), tokenizedTitle(current.title || ''));
+  const artistMatch = normalizedArtist(candidate.artist || '') === normalizedArtist(current.artist || '');
+
+  if (!pTitle.trim()) return false;
+  if (cTitle.includes(pTitle) || pTitle.includes(cTitle)) return true;
+  if (tokenScore > 0.78) return true;
+  if (tokenScore > 0.62 && artistMatch) return true;
+  return false;
+}
+
 async function fetchPersonalizedRecommendations(
   currentTrack: { youtubeId: string; title: string; artist: string },
   queue: Array<{ youtubeId?: string; title: string; artist: string }>,
@@ -135,7 +148,11 @@ async function fetchPersonalizedRecommendations(
   }).then((r) => r.data).catch(() => []);
 
   const results = (Array.isArray(response) ? response : []) as Suggestion[];
-  const filtered = results.filter((r) => r?.id && r.id !== currentTrack.youtubeId);
+  const filtered = results.filter((r) => {
+    if (!r?.id || r.id === currentTrack.youtubeId) return false;
+    if (isSameSongVariant({ title: r.title, artist: r.artist }, { title: currentTrack.title, artist: currentTrack.artist })) return false;
+    return true;
+  });
   recoCache.set(recoCacheKey, { ts: Date.now(), data: filtered });
   return filtered;
 }
