@@ -117,88 +117,27 @@ function isNoisyNonSong(title: string, artist: string): boolean {
 
 async function fetchPersonalizedRecommendations(
   currentTrack: { youtubeId: string; title: string; artist: string },
-  queue: Array<{ title: string; artist: string }>,
+  queue: Array<{ youtubeId?: string; title: string; artist: string }>,
   roomArtists: string[],
-  maxItems = 16
+  maxItems = 16,
+  roomId?: string
 ): Promise<Suggestion[]> {
-  const recoCacheKey = `${currentTrack.youtubeId}::${roomArtists.map((a) => a.toLowerCase()).join('|')}::${queue.length}`;
+  const recoCacheKey = `${currentTrack.youtubeId}::${roomArtists.map((a) => a.toLowerCase()).join('|')}::${queue.length}::${roomId || '-'}`;
   const cached = recoCache.get(recoCacheKey);
   if (cached && Date.now() - cached.ts < RECO_CACHE_TTL_MS) return cached.data;
 
-  const cleanTitle = currentTrack.title.split('|')[0].trim();
-  const mainArtist = (currentTrack.artist || '').split(',')[0].trim();
-  const langHint = detectLanguageHintFromText(`${currentTrack.artist} ${cleanTitle}`);
-  const currentCanon = canonicalSongKey(cleanTitle, mainArtist);
-  const currentTokens = tokenizedTitle(cleanTitle);
-  const currentArtistNorm = normalizedArtist(mainArtist);
-  const queueCanon = new Set(queue.map((q) => canonicalSongKey(q.title, q.artist)));
-  const roomArtistNorms = new Set(roomArtists.map((a) => normalizedArtist(a)));
+  const response = await api.post('/api/music/recommendations', {
+    currentTrack,
+    queue,
+    roomArtists,
+    roomId,
+    limit: maxItems,
+  }).then((r) => r.data).catch(() => []);
 
-  const querySet = new Set<string>([
-    `${mainArtist} radio ${langHint} songs`,
-    `${cleanTitle} similar songs official audio`,
-    `${mainArtist} top hits ${langHint}`,
-    `${cleanTitle} ${langHint} album songs`,
-    `${langHint} latest official songs`,
-    `${langHint} music label songs`,
-    ...roomArtists.flatMap((a) => [`${a} best songs`, `${a} official songs ${langHint}`]),
-  ]);
-
-  const queries = Array.from(querySet).slice(0, 5);
-  const lists = await Promise.all(
-    queries.map((q) => api.get(`/api/music/search?q=${encodeURIComponent(q)}`).then((r) => r.data).catch(() => []))
-  );
-  const merged = lists.flat() as Suggestion[];
-
-  const seenIds = new Set<string>();
-  const seenCanon = new Set<string>();
-  const ranked: Array<Suggestion & { __score: number; __artistNorm: string; __tokens: Set<string> }> = [];
-
-  for (const r of merged) {
-    if (!r?.id || seenIds.has(r.id)) continue;
-    if (!isLikelyMusicResult(r)) continue;
-    if (isNoisyNonSong(r.title || '', r.artist || '')) continue;
-    if (r.durationMs && (r.durationMs < 60000 || r.durationMs > 15 * 60 * 1000)) continue;
-
-    const key = canonicalSongKey(r.title || '', r.artist || '');
-    const tokens = tokenizedTitle(r.title || '');
-    const overlap = tokenOverlap(currentTokens, tokens);
-    const artistNorm = normalizedArtist(r.artist || '');
-    const sameAsCurrent = key === currentCanon || overlap > 0.6 || (artistNorm && artistNorm === currentArtistNorm && overlap > 0.4);
-
-    if (r.id === currentTrack.youtubeId || seenCanon.has(key) || queueCanon.has(key) || sameAsCurrent) continue;
-
-    seenIds.add(r.id);
-    seenCanon.add(key);
-
-    let score = 0;
-    if (`${r.title} ${r.artist}`.toLowerCase().includes(langHint)) score += 2;
-    if (roomArtistNorms.has(artistNorm)) score += 2;
-    score += Math.max(0, 1.4 - overlap * 2.1);
-    if (/official|audio|lyrical|lyrics|album/i.test(r.title || '')) score += 0.6;
-
-    ranked.push({ ...r, __score: score, __artistNorm: artistNorm, __tokens: tokens });
-  }
-
-  ranked.sort((a, b) => b.__score - a.__score);
-
-  const artistCount = new Map<string, number>();
-  const selected: Array<Suggestion & { __score: number; __artistNorm: string; __tokens: Set<string> }> = [];
-  for (const candidate of ranked) {
-    const artistKey = candidate.__artistNorm || 'unknown';
-    if ((artistCount.get(artistKey) || 0) >= 2) continue;
-
-    const nearDuplicate = selected.some((s) => tokenOverlap(s.__tokens, candidate.__tokens) > 0.72);
-    if (nearDuplicate) continue;
-
-    selected.push(candidate);
-    artistCount.set(artistKey, (artistCount.get(artistKey) || 0) + 1);
-    if (selected.length >= maxItems) break;
-  }
-
-  const final = selected.map(({ __score, __artistNorm, __tokens, ...rest }) => rest);
-  recoCache.set(recoCacheKey, { ts: Date.now(), data: final });
-  return final;
+  const results = (Array.isArray(response) ? response : []) as Suggestion[];
+  const filtered = results.filter((r) => r?.id && r.id !== currentTrack.youtubeId);
+  recoCache.set(recoCacheKey, { ts: Date.now(), data: filtered });
+  return filtered;
 }
 
 function isLikelyMusicResult(item: Suggestion): boolean {
@@ -542,7 +481,7 @@ function RecommendationsPanel({
 }: {
   onAddToQueue: (item: { youtubeId: string; title: string; artist: string; durationMs: number; thumbnailUrl: string; mode: 'next' | 'end' }) => void;
 }) {
-  const { currentTrack, queue } = useStore();
+  const { currentTrack, queue, roomId } = useStore();
   const [results, setResults] = useState<Suggestion[]>([]);
   const [loading, setLoading] = useState(false);
   const [refreshTick, setRefreshTick] = useState(0);
@@ -571,13 +510,14 @@ function RecommendationsPanel({
     setLoading(true);
     fetchPersonalizedRecommendations(
       { youtubeId: currentTrack.youtubeId, title: currentTrack.title, artist: currentTrack.artist },
-      queue.map((q) => ({ title: q.title, artist: q.artist })),
+      queue.map((q) => ({ youtubeId: q.youtubeId, title: q.title, artist: q.artist })),
       roomArtists,
-      14
+      14,
+      roomId || undefined
     )
       .then((out) => setResults(out))
       .finally(() => setLoading(false));
-  }, [currentTrack, queue, roomArtists, refreshTick]);
+  }, [currentTrack, queue, roomArtists, refreshTick, roomId]);
 
   if (!currentTrack) return <div className="p-4 text-sm text-t3">Play something to get recommendations.</div>;
   if (loading) return <div className="p-3 space-y-2">{Array.from({ length: 6 }).map((_, i) => <div key={i} className="skeleton h-14 rounded-xl" />)}</div>;
@@ -1349,9 +1289,10 @@ export default function RoomPage() {
     setSmartQueueLoading(true);
     fetchPersonalizedRecommendations(
       { youtubeId: currentTrack.youtubeId, title: currentTrack.title, artist: currentTrack.artist },
-      queue.map((q) => ({ title: q.title, artist: q.artist })),
+      queue.map((q) => ({ youtubeId: q.youtubeId, title: q.title, artist: q.artist })),
       roomArtists,
-      12
+      12,
+      roomId || undefined
     )
       .then(async (items) => {
         if (!mounted) return;
@@ -1372,7 +1313,7 @@ export default function RoomPage() {
       });
 
     return () => { mounted = false; };
-  }, [currentTrack, currentTrack?.youtubeId, queue, roomArtists]);
+  }, [currentTrack, currentTrack?.youtubeId, queue, roomArtists, roomId]);
 
   useEffect(() => {
     if (!smartQueueEnabled || !isHostOrDj) return;
@@ -1499,6 +1440,11 @@ export default function RoomPage() {
     toast.success(`Added to queue: ${item.title}`, { duration: 2200 });
   }, [queue.length, userId, setQueue, addToQueue, triggerHaptic]);
 
+  const shouldIgnoreTabSwipe = useCallback((target: EventTarget | null): boolean => {
+    if (!(target instanceof HTMLElement)) return false;
+    return !!target.closest('input, textarea, [contenteditable="true"], [data-no-tab-swipe="true"]');
+  }, []);
+
   if (loading) return <div className="min-h-screen grid place-items-center"><div className="w-10 h-10 rounded-full border-2 border-accent border-t-transparent animate-spin" /></div>;
 
   if (isMobile) {
@@ -1524,6 +1470,11 @@ export default function RoomPage() {
         <div
           className="relative z-[1] px-4 pt-4 space-y-3"
           onTouchStart={(e) => {
+            if (shouldIgnoreTabSwipe(e.target)) {
+              touchStartXRef.current = null;
+              setSwipePreviewX(0);
+              return;
+            }
             touchStartXRef.current = e.changedTouches[0].clientX;
             setSwipePreviewX(0);
           }}
@@ -1659,7 +1610,7 @@ export default function RoomPage() {
                   </div>
 
                   <div
-                    className="border-t border-[var(--border)] overflow-hidden rounded-t-2xl apple-glass"
+                    className="border-t border-[var(--border)] overflow-hidden rounded-t-2xl apple-glass flex flex-col"
                     style={{ height: `${mobilePanelSnap}vh` }}
                     onTouchStart={(e) => { touchStartYRef.current = e.changedTouches[0].clientY; }}
                     onTouchEnd={(e) => {
@@ -1707,14 +1658,16 @@ export default function RoomPage() {
                         </div>
                       </div>
                     </div>
-                    <div className="h-full overflow-y-auto">
+                    <div className="flex-1 min-h-0 overflow-hidden">
                     {mobilePlayerPanel === 'search' && (
-                      <SearchResultsPanel
-                        query={mobileSearchQuery}
-                        onQueryChange={setMobileSearchQuery}
-                        onAddToQueue={addToQueueFromSearch}
-                        recentKey="lito-recent-searches-mobile"
-                      />
+                      <div data-no-tab-swipe="true">
+                        <SearchResultsPanel
+                          query={mobileSearchQuery}
+                          onQueryChange={setMobileSearchQuery}
+                          onAddToQueue={addToQueueFromSearch}
+                          recentKey="lito-recent-searches-mobile"
+                        />
+                      </div>
                     )}
                     {mobilePlayerPanel === 'recommendations' && <RecommendationsPanel onAddToQueue={addToQueueFromSearch} />}
                     {mobilePlayerPanel === 'queue' && (
