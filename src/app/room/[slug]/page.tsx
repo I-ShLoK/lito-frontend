@@ -144,7 +144,7 @@ async function fetchPersonalizedRecommendations(
     ...roomArtists.flatMap((a) => [`${a} best songs`, `${a} official songs ${langHint}`]),
   ]);
 
-  const queries = Array.from(querySet).slice(0, 8);
+  const queries = Array.from(querySet).slice(0, 5);
   const lists = await Promise.all(
     queries.map((q) => api.get(`/api/music/search?q=${encodeURIComponent(q)}`).then((r) => r.data).catch(() => []))
   );
@@ -637,7 +637,6 @@ function RoomHomePanel({
       `${language} ${facets[flavor]}`,
       `${language} official songs`,
       `${language} music label hits`,
-      `${language} album songs`,
     ];
 
     const fallbackSeeds: Record<HomeLanguage, string[]> = {
