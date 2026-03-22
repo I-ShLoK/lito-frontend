@@ -41,17 +41,8 @@ interface Suggestion {
   thumbnailUrl: string;
 }
 
-function preferredLanguage(): string {
-  if (typeof navigator === 'undefined') return 'english';
-  const lang = (navigator.language || 'en').toLowerCase();
-  if (lang.startsWith('hi')) return 'hindi';
-  if (lang.startsWith('te')) return 'telugu';
-  if (lang.startsWith('ta')) return 'tamil';
-  if (lang.startsWith('ml')) return 'malayalam';
-  if (lang.startsWith('bn')) return 'bengali';
-  if (lang.startsWith('gu')) return 'gujarati';
-  return 'english';
-}
+type HomeLanguage = 'english' | 'telugu' | 'hindi' | 'tamil' | 'punjabi' | 'malayalam';
+const HOME_LANGUAGES: HomeLanguage[] = ['english', 'telugu', 'hindi', 'tamil', 'punjabi', 'malayalam'];
 
 function avatarColor(seed: string): string {
   const colors = ['#c8f135', '#f135c8', '#35c8f1', '#f1c835', '#c835f1', '#35f1c8'];
@@ -353,22 +344,25 @@ function RecommendationsPanel({
 
 function RoomHomePanel({
   onAddToQueue,
+  language,
+  onLanguageChange,
   compact = false,
 }: {
   onAddToQueue: (item: { youtubeId: string; title: string; artist: string; durationMs: number; thumbnailUrl: string; mode: 'next' | 'end' }) => void;
+  language: HomeLanguage;
+  onLanguageChange: (language: HomeLanguage) => void;
   compact?: boolean;
 }) {
   const [items, setItems] = useState<Suggestion[]>([]);
   const [loading, setLoading] = useState(true);
-  const lang = useMemo(() => preferredLanguage(), []);
 
   useEffect(() => {
     let mounted = true;
     const queries = [
-      `${lang} latest songs`,
-      `${lang} top hits playlist`,
-      `${lang} trending music`,
-      `${lang} romantic songs`,
+      `${language} latest songs`,
+      `${language} top hits playlist`,
+      `${language} trending music`,
+      `${language} romantic songs`,
     ];
 
     setLoading(true);
@@ -390,7 +384,7 @@ function RoomHomePanel({
       });
 
     return () => { mounted = false; };
-  }, [lang, compact]);
+  }, [language, compact]);
 
   if (loading) {
     return <div className="p-3 grid grid-cols-3 gap-2">{Array.from({ length: compact ? 6 : 9 }).map((_, i) => <div key={i} className="skeleton rounded-xl h-28" />)}</div>;
@@ -398,6 +392,17 @@ function RoomHomePanel({
 
   return (
     <div className="h-full overflow-y-auto p-3">
+      <div className="flex gap-2 overflow-x-auto pb-2 mb-2">
+        {HOME_LANGUAGES.map((lang) => (
+          <button
+            key={lang}
+            onClick={() => onLanguageChange(lang)}
+            className={`px-3 py-1.5 rounded-full text-xs whitespace-nowrap ${language === lang ? 'bg-accent text-bg' : 'bg-elevated text-t2'}`}
+          >
+            {lang}
+          </button>
+        ))}
+      </div>
       <div className={`grid ${compact ? 'grid-cols-2' : 'grid-cols-3'} gap-2`}>
         {items.map((item) => (
           <button
@@ -522,6 +527,7 @@ export default function RoomPage() {
   const [desktopLeftTab, setDesktopLeftTab] = useState<'queue' | 'search' | 'recommendations'>('queue');
   const [desktopSearchQuery, setDesktopSearchQuery] = useState('');
   const [unreadChatCount, setUnreadChatCount] = useState(0);
+  const [homeLanguage, setHomeLanguage] = useState<HomeLanguage>('english');
 
   const touchStartXRef = useRef<number | null>(null);
   const warnedLastTrackRef = useRef<string | null>(null);
@@ -604,6 +610,19 @@ export default function RoomPage() {
   useEffect(() => {
     if (!draggingSeek) setSeekValue(localPositionMs);
   }, [localPositionMs, draggingSeek]);
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const saved = window.localStorage.getItem('lito-home-language') as HomeLanguage | null;
+    if (saved && HOME_LANGUAGES.includes(saved)) {
+      setHomeLanguage(saved);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    window.localStorage.setItem('lito-home-language', homeLanguage);
+  }, [homeLanguage]);
 
   useEffect(() => {
     const currentId = currentTrack?.youtubeId;
@@ -706,7 +725,7 @@ export default function RoomPage() {
     };
 
     return (
-      <div className="min-h-screen bg-bg pb-24">
+      <div className="min-h-screen bg-bg pb-6">
         <div className="mesh-bg">
           <div className="mesh-blob w-80 h-80 -top-20 -left-20" style={{ background: 'var(--accent)' }} />
           <div className="mesh-blob w-80 h-80 top-1/2 -right-24" style={{ background: 'var(--accent-dim)' }} />
@@ -777,42 +796,72 @@ export default function RoomPage() {
                   <span className="text-xs text-t3">Open</span>
                 </button>
                 <div className="flex-1 min-h-0 overflow-hidden">
-                  {mobileRoomPanel === 'listeners'
-                    ? <People />
-                    : <RoomHomePanel onAddToQueue={addToQueueFromSearch} compact />}
+                  {mobileRoomPanel === 'listeners' ? (
+                    <div className="h-full min-h-0 flex flex-col">
+                      <div className="px-3 pb-2">
+                        <button
+                          onClick={() => setMobileRoomPanel('home')}
+                          className="text-xs px-3 py-1.5 rounded-lg bg-elevated text-t2"
+                        >
+                          ← Back to Home
+                        </button>
+                      </div>
+                      <div className="flex-1 min-h-0 overflow-hidden">
+                        <People />
+                      </div>
+                    </div>
+                  ) : (
+                    <RoomHomePanel onAddToQueue={addToQueueFromSearch} language={homeLanguage} onLanguageChange={setHomeLanguage} compact />
+                  )}
                 </div>
               </motion.div>
             )}
 
             {mobileTab === 'player' && (
               <motion.div key="player" initial={{ opacity: 0, x: -12 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: 12 }} className="space-y-2">
-                <div className="apple-glass rounded-2xl px-3 py-2">
-                  <PlayerCore
-                    isHostOrDj={isHostOrDj}
-                    seekValue={seekValue}
-                    onSeekPreview={(v) => { setDraggingSeek(true); setSeekValue(v); }}
-                    onSeekCommit={handleSeekCommit}
-                    onPlay={onPlay}
-                    onPause={onPause}
-                    onSkipPrev={skipPrev}
-                    onSkipNext={skipNext}
-                    onShuffle={shuffleQueue}
-                    onToggleLoop={toggleLoop}
-                  />
-                </div>
-
-                <div className="apple-glass rounded-2xl h-[27vh] overflow-hidden">
-                  {mobilePlayerPanel === 'search' && (
-                    <SearchResultsPanel
-                      query={mobileSearchQuery}
-                      onQueryChange={setMobileSearchQuery}
-                      onAddToQueue={addToQueueFromSearch}
+                <div className="apple-glass rounded-2xl overflow-hidden">
+                  <div className="px-3 py-2">
+                    <PlayerCore
+                      isHostOrDj={isHostOrDj}
+                      seekValue={seekValue}
+                      onSeekPreview={(v) => { setDraggingSeek(true); setSeekValue(v); }}
+                      onSeekCommit={handleSeekCommit}
+                      onPlay={onPlay}
+                      onPause={onPause}
+                      onSkipPrev={skipPrev}
+                      onSkipNext={skipNext}
+                      onShuffle={shuffleQueue}
+                      onToggleLoop={toggleLoop}
                     />
-                  )}
-                  {mobilePlayerPanel === 'recommendations' && <RecommendationsPanel onAddToQueue={addToQueue} />}
-                  {mobilePlayerPanel === 'queue' && (
-                    <Queue onAddToQueue={addToQueue} onRemoveFromQueue={removeFromQueue} onReorderQueue={reorderQueue} isHostOrDj={isHostOrDj} showSearch={false} />
-                  )}
+                  </div>
+
+                  <div className="px-3 pb-3">
+                    <div className="apple-glass glow-accent rounded-[24px] px-4 py-2 flex items-center justify-around">
+                      <button onClick={() => setMobilePlayerPanel('search')} className={`h-11 w-11 rounded-2xl flex items-center justify-center ${mobilePlayerPanel === 'search' ? 'bg-accent text-bg shadow-[0_10px_30px_rgba(255,255,255,0.22)]' : 'text-t2'}`} aria-label="Search">
+                        <SearchIcon />
+                      </button>
+                      <button onClick={() => setMobilePlayerPanel('recommendations')} className={`h-11 w-11 rounded-2xl flex items-center justify-center ${mobilePlayerPanel === 'recommendations' ? 'bg-accent text-bg shadow-[0_10px_30px_rgba(255,255,255,0.22)]' : 'text-t2'}`} aria-label="Recommendations">
+                        <RecommendIcon />
+                      </button>
+                      <button onClick={() => setMobilePlayerPanel('queue')} className={`h-11 w-11 rounded-2xl flex items-center justify-center ${mobilePlayerPanel === 'queue' ? 'bg-accent text-bg shadow-[0_10px_30px_rgba(255,255,255,0.22)]' : 'text-t2'}`} aria-label="Queue">
+                        <QueueIcon />
+                      </button>
+                    </div>
+                  </div>
+
+                  <div className="h-[30vh] border-t border-[var(--border)] overflow-hidden">
+                    {mobilePlayerPanel === 'search' && (
+                      <SearchResultsPanel
+                        query={mobileSearchQuery}
+                        onQueryChange={setMobileSearchQuery}
+                        onAddToQueue={addToQueueFromSearch}
+                      />
+                    )}
+                    {mobilePlayerPanel === 'recommendations' && <RecommendationsPanel onAddToQueue={addToQueue} />}
+                    {mobilePlayerPanel === 'queue' && (
+                      <Queue onAddToQueue={addToQueue} onRemoveFromQueue={removeFromQueue} onReorderQueue={reorderQueue} isHostOrDj={isHostOrDj} showSearch={false} />
+                    )}
+                  </div>
                 </div>
               </motion.div>
             )}
@@ -825,19 +874,6 @@ export default function RoomPage() {
           </AnimatePresence>
         </div>
 
-        <div className="fixed bottom-0 inset-x-0 p-3 z-20">
-          <div className="apple-glass glow-accent rounded-[28px] px-5 py-3 flex items-center justify-around">
-            <button onClick={() => { setMobileTab('player'); setMobilePlayerPanel('search'); }} className={`h-11 w-11 rounded-2xl flex items-center justify-center ${mobileTab === 'player' && mobilePlayerPanel === 'search' ? 'bg-accent text-bg shadow-[0_10px_30px_rgba(255,255,255,0.22)]' : 'text-t2'}`} aria-label="Search">
-              <SearchIcon />
-            </button>
-            <button onClick={() => { setMobileTab('player'); setMobilePlayerPanel('recommendations'); }} className={`h-11 w-11 rounded-2xl flex items-center justify-center ${mobileTab === 'player' && mobilePlayerPanel === 'recommendations' ? 'bg-accent text-bg shadow-[0_10px_30px_rgba(255,255,255,0.22)]' : 'text-t2'}`} aria-label="Recommendations">
-              <RecommendIcon />
-            </button>
-            <button onClick={() => { setMobileTab('player'); setMobilePlayerPanel('queue'); }} className={`h-11 w-11 rounded-2xl flex items-center justify-center ${mobileTab === 'player' && mobilePlayerPanel === 'queue' ? 'bg-accent text-bg shadow-[0_10px_30px_rgba(255,255,255,0.22)]' : 'text-t2'}`} aria-label="Queue">
-              <QueueIcon />
-            </button>
-          </div>
-        </div>
       </div>
     );
   }
@@ -877,7 +913,7 @@ export default function RoomPage() {
             </div>
           </div>
           <div className="h-[36vh]">
-            <RoomHomePanel onAddToQueue={addToQueueFromSearch} />
+            <RoomHomePanel onAddToQueue={addToQueueFromSearch} language={homeLanguage} onLanguageChange={setHomeLanguage} />
           </div>
         </div>
 
