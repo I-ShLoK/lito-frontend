@@ -83,6 +83,113 @@ function tokenOverlap(a: Set<string>, b: Set<string>): number {
   return inter / Math.max(a.size, b.size);
 }
 
+function detectLanguageHintFromText(text: string): string {
+  if (/[\u0900-\u097F]/.test(text)) return 'hindi';
+  if (/[\u0980-\u09FF]/.test(text)) return 'bengali';
+  if (/[\u0A80-\u0AFF]/.test(text)) return 'gujarati';
+  if (/[\u0B80-\u0BFF]/.test(text)) return 'tamil';
+  if (/[\u0C00-\u0C7F]/.test(text)) return 'telugu';
+  if (/[\u0D00-\u0D7F]/.test(text)) return 'malayalam';
+  return 'english';
+}
+
+function normalizedArtist(artist: string): string {
+  return artist
+    .toLowerCase()
+    .replace(/\b(records?|music|official|topic|vevo|channel|entertainment)\b/g, ' ')
+    .replace(/[^a-z0-9\u0900-\u0d7f]+/gi, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .split(' ')
+    .slice(0, 3)
+    .join(' ');
+}
+
+function isNoisyNonSong(title: string, artist: string): boolean {
+  const s = `${title} ${artist}`.toLowerCase();
+  return /reaction|review|status|shorts?|interview|vlog|gameplay|car|truck|vs\b|news|prank|comedy|travel|transform|trailer/.test(s);
+}
+
+async function fetchPersonalizedRecommendations(
+  currentTrack: { youtubeId: string; title: string; artist: string },
+  queue: Array<{ title: string; artist: string }>,
+  roomArtists: string[],
+  maxItems = 16
+): Promise<Suggestion[]> {
+  const cleanTitle = currentTrack.title.split('|')[0].trim();
+  const mainArtist = (currentTrack.artist || '').split(',')[0].trim();
+  const langHint = detectLanguageHintFromText(`${currentTrack.artist} ${cleanTitle}`);
+  const currentCanon = canonicalSongKey(cleanTitle, mainArtist);
+  const currentTokens = tokenizedTitle(cleanTitle);
+  const currentArtistNorm = normalizedArtist(mainArtist);
+  const queueCanon = new Set(queue.map((q) => canonicalSongKey(q.title, q.artist)));
+  const roomArtistNorms = new Set(roomArtists.map((a) => normalizedArtist(a)));
+
+  const querySet = new Set<string>([
+    `${mainArtist} radio ${langHint} songs`,
+    `${cleanTitle} similar songs official audio`,
+    `${mainArtist} top hits ${langHint}`,
+    `${cleanTitle} ${langHint} album songs`,
+    `${langHint} latest official songs`,
+    `${langHint} music label songs`,
+    ...roomArtists.flatMap((a) => [`${a} best songs`, `${a} official songs ${langHint}`]),
+  ]);
+
+  const queries = Array.from(querySet).slice(0, 8);
+  const lists = await Promise.all(
+    queries.map((q) => api.get(`/api/music/search?q=${encodeURIComponent(q)}`).then((r) => r.data).catch(() => []))
+  );
+  const merged = lists.flat() as Suggestion[];
+
+  const seenIds = new Set<string>();
+  const seenCanon = new Set<string>();
+  const ranked: Array<Suggestion & { __score: number; __artistNorm: string; __tokens: Set<string> }> = [];
+
+  for (const r of merged) {
+    if (!r?.id || seenIds.has(r.id)) continue;
+    if (!isLikelyMusicResult(r)) continue;
+    if (isNoisyNonSong(r.title || '', r.artist || '')) continue;
+    if (r.durationMs && (r.durationMs < 60000 || r.durationMs > 15 * 60 * 1000)) continue;
+
+    const key = canonicalSongKey(r.title || '', r.artist || '');
+    const tokens = tokenizedTitle(r.title || '');
+    const overlap = tokenOverlap(currentTokens, tokens);
+    const artistNorm = normalizedArtist(r.artist || '');
+    const sameAsCurrent = key === currentCanon || overlap > 0.6 || (artistNorm && artistNorm === currentArtistNorm && overlap > 0.4);
+
+    if (r.id === currentTrack.youtubeId || seenCanon.has(key) || queueCanon.has(key) || sameAsCurrent) continue;
+
+    seenIds.add(r.id);
+    seenCanon.add(key);
+
+    let score = 0;
+    if (`${r.title} ${r.artist}`.toLowerCase().includes(langHint)) score += 2;
+    if (roomArtistNorms.has(artistNorm)) score += 2;
+    score += Math.max(0, 1.4 - overlap * 2.1);
+    if (/official|audio|lyrical|lyrics|album/i.test(r.title || '')) score += 0.6;
+
+    ranked.push({ ...r, __score: score, __artistNorm: artistNorm, __tokens: tokens });
+  }
+
+  ranked.sort((a, b) => b.__score - a.__score);
+
+  const artistCount = new Map<string, number>();
+  const selected: Array<Suggestion & { __score: number; __artistNorm: string; __tokens: Set<string> }> = [];
+  for (const candidate of ranked) {
+    const artistKey = candidate.__artistNorm || 'unknown';
+    if ((artistCount.get(artistKey) || 0) >= 2) continue;
+
+    const nearDuplicate = selected.some((s) => tokenOverlap(s.__tokens, candidate.__tokens) > 0.72);
+    if (nearDuplicate) continue;
+
+    selected.push(candidate);
+    artistCount.set(artistKey, (artistCount.get(artistKey) || 0) + 1);
+    if (selected.length >= maxItems) break;
+  }
+
+  return selected.map(({ __score, __artistNorm, __tokens, ...rest }) => rest);
+}
+
 function isLikelyMusicResult(item: Suggestion): boolean {
   const t = (item.title || '').toLowerCase();
   const a = (item.artist || '').toLowerCase();
@@ -193,7 +300,11 @@ function SearchResultsPanel({
           pushRecentSearch(q);
           const importRes = await api.post('/api/music/import-playlist', { url: q });
           setPlaylistMode(true);
-          setResults((importRes.data || []) as Suggestion[]);
+          const imported = (importRes.data || []) as Suggestion[];
+          setResults(imported);
+          if (imported.length === 0) {
+            toast.error('Playlist import returned no playable tracks. Try again in a few seconds.');
+          }
           return;
         }
 
@@ -218,6 +329,7 @@ function SearchResultsPanel({
       } catch {
         setResults([]);
         setPlaylistMode(false);
+        if (isPlaylistLink(q)) toast.error('Playlist import failed. Please retry with the playlist URL.');
       } finally {
         setLoading(false);
       }
@@ -374,17 +486,8 @@ function RecommendationsPanel({
   const { currentTrack, queue } = useStore();
   const [results, setResults] = useState<Suggestion[]>([]);
   const [loading, setLoading] = useState(false);
+  const [refreshTick, setRefreshTick] = useState(0);
   const lastKeyRef = useRef('');
-
-  const detectLanguageHint = useCallback((text: string): string => {
-    if (/[\u0900-\u097F]/.test(text)) return 'hindi';
-    if (/[\u0980-\u09FF]/.test(text)) return 'bengali';
-    if (/[\u0A80-\u0AFF]/.test(text)) return 'gujarati';
-    if (/[\u0B80-\u0BFF]/.test(text)) return 'tamil';
-    if (/[\u0C00-\u0C7F]/.test(text)) return 'telugu';
-    if (/[\u0D00-\u0D7F]/.test(text)) return 'malayalam';
-    return 'english';
-  }, []);
 
   const roomArtists = useMemo(() => {
     const map = new Map<string, number>();
@@ -402,52 +505,34 @@ function RecommendationsPanel({
   useEffect(() => {
     if (!currentTrack) return;
 
-    const key = `${currentTrack.youtubeId}:${roomArtists.join(',')}`;
+    const key = `${currentTrack.youtubeId}:${roomArtists.join(',')}:${refreshTick}`;
     if (lastKeyRef.current === key) return;
     lastKeyRef.current = key;
 
-    const cleanTitle = currentTrack.title.split('|')[0].trim();
-    const mainArtist = (currentTrack.artist || '').split(',')[0].trim();
-    const langHint = detectLanguageHint(`${currentTrack.artist} ${cleanTitle}`);
-    const currentCanon = canonicalSongKey(cleanTitle, mainArtist);
-    const currentTokens = tokenizedTitle(cleanTitle);
-    const queueCanon = new Set(queue.map((q) => canonicalSongKey(q.title, q.artist)));
-
-    const queries = [
-      `${mainArtist} ${cleanTitle} similar songs ${langHint}`,
-      `${cleanTitle} ${langHint} album songs`,
-      `${mainArtist} best songs ${langHint}`,
-      ...roomArtists.map((a) => `${a} ${langHint} hits`),
-    ].slice(0, 4);
-
     setLoading(true);
-    Promise.all(
-      queries.map((q) => api.get(`/api/music/search?q=${encodeURIComponent(q)}`).then((r) => r.data).catch(() => []))
+    fetchPersonalizedRecommendations(
+      { youtubeId: currentTrack.youtubeId, title: currentTrack.title, artist: currentTrack.artist },
+      queue.map((q) => ({ title: q.title, artist: q.artist })),
+      roomArtists,
+      14
     )
-      .then((lists) => {
-        const merged = lists.flat() as Suggestion[];
-        const seenIds = new Set<string>();
-        const seenCanon = new Set<string>();
-        const out = merged.filter((r) => {
-          const key = canonicalSongKey(r?.title || '', r?.artist || '');
-          const overlap = tokenOverlap(currentTokens, tokenizedTitle(r?.title || ''));
-          const noisy = /reaction|review|status|shorts?/i.test(`${r?.title || ''} ${r?.artist || ''}`);
-          const sameAsCurrent = key === currentCanon || overlap > 0.68;
-          if (!r?.id || seenIds.has(r.id) || r.id === currentTrack.youtubeId || seenCanon.has(key) || queueCanon.has(key) || sameAsCurrent || noisy) return false;
-          seenIds.add(r.id);
-          seenCanon.add(key);
-          return true;
-        });
-        setResults(out.slice(0, 12));
-      })
+      .then((out) => setResults(out))
       .finally(() => setLoading(false));
-  }, [currentTrack, queue, roomArtists, detectLanguageHint]);
+  }, [currentTrack, queue, roomArtists, refreshTick]);
 
   if (!currentTrack) return <div className="p-4 text-sm text-t3">Play something to get recommendations.</div>;
   if (loading) return <div className="p-3 space-y-2">{Array.from({ length: 6 }).map((_, i) => <div key={i} className="skeleton h-14 rounded-xl" />)}</div>;
 
   return (
     <div className="overflow-y-auto h-full p-2 space-y-1">
+      <div className="flex items-center justify-end px-1 pb-1">
+        <button
+          onClick={() => setRefreshTick((v) => v + 1)}
+          className="text-xs px-2 py-1 rounded-lg bg-elevated text-t2"
+        >
+          Refresh
+        </button>
+      </div>
       {results.map((r) => (
         <div key={r.id} className="flex items-center gap-3 p-2 rounded-xl hover:bg-elevated group">
           <div className="w-11 h-11 rounded-lg overflow-hidden bg-elevated">
@@ -700,12 +785,28 @@ export default function RoomPage() {
   const [unreadChatCount, setUnreadChatCount] = useState(0);
   const [homeLanguage, setHomeLanguage] = useState<HomeLanguage>('english');
   const [volume, setVolume] = useState(0.92);
+  const [smartQueueEnabled, setSmartQueueEnabled] = useState(true);
+  const [smartQueueItems, setSmartQueueItems] = useState<Suggestion[]>([]);
+  const [smartQueueLoading, setSmartQueueLoading] = useState(false);
 
   const touchStartXRef = useRef<number | null>(null);
   const warnedLastTrackRef = useRef<string | null>(null);
   const prevMessageCountRef = useRef(0);
+  const smartQueueAutoRef = useRef('');
   const isHost = userId === hostId;
   const isHostOrDj = isHost || djMode;
+  const roomArtists = useMemo(() => {
+    const map = new Map<string, number>();
+    for (const item of queue) {
+      const artist = (item.artist || '').trim();
+      if (!artist) continue;
+      map.set(artist, (map.get(artist) || 0) + 1);
+    }
+    return Array.from(map.entries())
+      .sort((a, b) => b[1] - a[1])
+      .slice(0, 4)
+      .map(([artist]) => artist);
+  }, [queue]);
 
   const {
     timeOffsetRef, joinRoom, leaveRoom,
@@ -804,6 +905,8 @@ export default function RoomPage() {
     if (savedPlayerPanel === 'search' || savedPlayerPanel === 'recommendations' || savedPlayerPanel === 'queue') setMobilePlayerPanel(savedPlayerPanel);
     const savedDesktopLeft = window.localStorage.getItem('lito-pref-desktop-left');
     if (savedDesktopLeft === 'queue' || savedDesktopLeft === 'search' || savedDesktopLeft === 'recommendations') setDesktopLeftTab(savedDesktopLeft);
+    const savedSmartEnabled = window.localStorage.getItem('lito-smart-queue-enabled');
+    if (savedSmartEnabled === '0' || savedSmartEnabled === '1') setSmartQueueEnabled(savedSmartEnabled === '1');
   }, []);
 
   useEffect(() => {
@@ -830,6 +933,11 @@ export default function RoomPage() {
     if (typeof window === 'undefined') return;
     window.localStorage.setItem('lito-pref-desktop-left', desktopLeftTab);
   }, [desktopLeftTab]);
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    window.localStorage.setItem('lito-smart-queue-enabled', smartQueueEnabled ? '1' : '0');
+  }, [smartQueueEnabled]);
 
   useEffect(() => {
     const currentId = currentTrack?.youtubeId;
@@ -946,6 +1054,71 @@ export default function RoomPage() {
     prevMessageCountRef.current = next;
   }, [messages.length, isMobile, desktopSocialTab, mobileTab]);
 
+  useEffect(() => {
+    let mounted = true;
+    if (!currentTrack) {
+      setSmartQueueItems([]);
+      return;
+    }
+
+    setSmartQueueLoading(true);
+    fetchPersonalizedRecommendations(
+      { youtubeId: currentTrack.youtubeId, title: currentTrack.title, artist: currentTrack.artist },
+      queue.map((q) => ({ title: q.title, artist: q.artist })),
+      roomArtists,
+      12
+    )
+      .then((items) => {
+        if (!mounted) return;
+        setSmartQueueItems(items);
+      })
+      .finally(() => {
+        if (mounted) setSmartQueueLoading(false);
+      });
+
+    return () => { mounted = false; };
+  }, [currentTrack, currentTrack?.youtubeId, queue, roomArtists]);
+
+  useEffect(() => {
+    if (!smartQueueEnabled || !isHostOrDj) return;
+    if (!currentTrack || !playbackState.isPlaying) return;
+    if (queue.length > 0) {
+      smartQueueAutoRef.current = '';
+      return;
+    }
+    if (smartQueueItems.length === 0) return;
+
+    const next = smartQueueItems[0];
+    const fingerprint = `${currentTrack.youtubeId}:${next.id}`;
+    if (smartQueueAutoRef.current === fingerprint) return;
+    smartQueueAutoRef.current = fingerprint;
+
+    const optimistic: QueueItem = {
+      id: `optimistic-smart-${Date.now()}-${Math.random().toString(16).slice(2, 8)}`,
+      position: queue.length,
+      votes: 0,
+      addMode: 'end',
+      addedBy: userId,
+      addedByUsername: useStore.getState().username || 'smart queue',
+      trackId: next.id,
+      youtubeId: next.id,
+      title: next.title,
+      artist: next.artist,
+      durationMs: next.durationMs,
+      thumbnailUrl: next.thumbnailUrl,
+    };
+    setQueue([...useStore.getState().queue, optimistic]);
+    addToQueue({
+      youtubeId: next.id,
+      title: next.title,
+      artist: next.artist,
+      durationMs: next.durationMs,
+      thumbnailUrl: next.thumbnailUrl,
+      mode: 'end',
+    });
+    toast('Smart queue picked the next song', { duration: 2200 });
+  }, [smartQueueEnabled, isHostOrDj, currentTrack, currentTrack?.youtubeId, playbackState.isPlaying, queue.length, smartQueueItems, userId, setQueue, addToQueue]);
+
   const handleSeekCommit = (value: number) => {
     setDraggingSeek(false);
     if (isHostOrDj) seek(value);
@@ -981,7 +1154,7 @@ export default function RoomPage() {
     triggerHaptic(10);
     toggleLoop();
   };
-  const addToQueueFromSearch = (item: { youtubeId: string; title: string; artist: string; durationMs: number; thumbnailUrl: string; mode: 'next' | 'end' }) => {
+  const addToQueueFromSearch = useCallback((item: { youtubeId: string; title: string; artist: string; durationMs: number; thumbnailUrl: string; mode: 'next' | 'end' }) => {
     const optimistic: QueueItem = {
       id: `optimistic-${Date.now()}-${Math.random().toString(16).slice(2, 8)}`,
       position: queue.length,
@@ -1005,7 +1178,7 @@ export default function RoomPage() {
     addToQueue(item);
     triggerHaptic(14);
     toast.success(`Added to queue: ${item.title}`, { duration: 2200 });
-  };
+  }, [queue.length, userId, setQueue, addToQueue, triggerHaptic]);
 
   if (loading) return <div className="min-h-screen grid place-items-center"><div className="w-10 h-10 rounded-full border-2 border-accent border-t-transparent animate-spin" /></div>;
 
@@ -1167,12 +1340,16 @@ export default function RoomPage() {
                     {mobilePlayerPanel === 'recommendations' && <RecommendationsPanel onAddToQueue={addToQueueFromSearch} />}
                     {mobilePlayerPanel === 'queue' && (
                       <Queue
-                        onAddToQueue={addToQueue}
+                        onAddToQueue={addToQueueFromSearch}
                         onRemoveFromQueue={(id) => { triggerHaptic(10); removeFromQueue(id); }}
                         onReorderQueue={reorderQueue}
                         isHostOrDj={isHostOrDj}
                         showSearch={false}
                         onRequestSearch={() => setMobilePlayerPanel('search')}
+                        smartQueueItems={smartQueueItems}
+                        smartQueueEnabled={smartQueueEnabled}
+                        smartQueueLoading={smartQueueLoading}
+                        onToggleSmartQueueEnabled={() => setSmartQueueEnabled((v) => !v)}
                       />
                     )}
                   </div>
@@ -1247,12 +1424,16 @@ export default function RoomPage() {
             <div className="flex-1 min-h-0 overflow-hidden">
               {desktopLeftTab === 'queue' && (
                 <Queue
-                  onAddToQueue={addToQueue}
+                  onAddToQueue={addToQueueFromSearch}
                   onRemoveFromQueue={(id) => removeFromQueue(id)}
                   onReorderQueue={reorderQueue}
                   isHostOrDj={isHostOrDj}
                   showSearch={false}
                   onRequestSearch={() => setDesktopLeftTab('search')}
+                  smartQueueItems={smartQueueItems}
+                  smartQueueEnabled={smartQueueEnabled}
+                  smartQueueLoading={smartQueueLoading}
+                  onToggleSmartQueueEnabled={() => setSmartQueueEnabled((v) => !v)}
                 />
               )}
               {desktopLeftTab === 'search' && (

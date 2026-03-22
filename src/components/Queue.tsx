@@ -28,6 +28,10 @@ interface QueueProps {
   isHostOrDj: boolean;
   showSearch?: boolean;
   onRequestSearch?: () => void;
+  smartQueueItems?: VideoResult[];
+  smartQueueEnabled?: boolean;
+  smartQueueLoading?: boolean;
+  onToggleSmartQueueEnabled?: () => void;
 }
 
 function formatDuration(ms: number): string {
@@ -38,7 +42,18 @@ function formatDuration(ms: number): string {
   return `${m}:${sec.toString().padStart(2, '0')}`;
 }
 
-export default function Queue({ onAddToQueue, onRemoveFromQueue, onReorderQueue, isHostOrDj, showSearch = true, onRequestSearch }: QueueProps) {
+export default function Queue({
+  onAddToQueue,
+  onRemoveFromQueue,
+  onReorderQueue,
+  isHostOrDj,
+  showSearch = true,
+  onRequestSearch,
+  smartQueueItems = [],
+  smartQueueEnabled = true,
+  smartQueueLoading = false,
+  onToggleSmartQueueEnabled,
+}: QueueProps) {
   const { queue, currentTrack, userId } = useStore();
   const [query, setQuery] = useState('');
   const [results, setResults] = useState<VideoResult[]>([]);
@@ -305,6 +320,49 @@ export default function Queue({ onAddToQueue, onRemoveFromQueue, onReorderQueue,
             })
           )}
         </AnimatePresence>
+
+        <div className="mt-3 pt-3 border-t border-[var(--border)]">
+          <div className="flex items-center justify-between px-1 mb-2">
+            <p className="text-[11px] uppercase tracking-wider text-t3">Smart Queue</p>
+            <button
+              onClick={() => {
+                triggerHaptic();
+                onToggleSmartQueueEnabled?.();
+              }}
+              className={`text-xs px-2 py-1 rounded-lg border ${smartQueueEnabled ? 'bg-accent text-bg border-accent' : 'bg-elevated text-t2 border-[var(--border)]'}`}
+            >
+              {smartQueueEnabled ? 'Auto-play ON' : 'Auto-play OFF'}
+            </button>
+          </div>
+
+          {smartQueueLoading ? (
+            <div className="space-y-2 px-1">
+              {Array.from({ length: 3 }).map((_, i) => <div key={i} className="skeleton h-12 rounded-xl" />)}
+            </div>
+          ) : smartQueueItems.length === 0 ? (
+            <div className="px-1 pb-2 text-xs text-t3">No smart suggestions yet. Play a song to generate them.</div>
+          ) : (
+            <div className="space-y-1">
+              {smartQueueItems.slice(0, 6).map((r) => (
+                <div key={`smart-${r.id}`} className="flex items-center gap-2 p-2 rounded-xl hover:bg-elevated group">
+                  <div className="w-10 h-10 rounded-lg overflow-hidden bg-elevated">
+                    <Thumb src={r.thumbnailUrl || `https://i.ytimg.com/vi/${r.id}/hqdefault.jpg`} alt="" className="w-full h-full object-cover" />
+                  </div>
+                  <div className="min-w-0 flex-1">
+                    <p className="text-xs truncate">{r.title}</p>
+                    <p className="text-[11px] text-t3 truncate">{r.artist}</p>
+                  </div>
+                  <button
+                    onClick={() => handleAdd(r, 'end')}
+                    className="text-xs px-2 py-1.5 rounded-lg bg-accent text-bg opacity-0 group-hover:opacity-100 transition-opacity"
+                  >
+                    Add
+                  </button>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
       </div>
 
       <AnimatePresence>
