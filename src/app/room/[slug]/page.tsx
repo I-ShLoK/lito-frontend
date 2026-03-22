@@ -65,6 +65,37 @@ function canonicalSongKey(title: string, artist?: string): string {
   return `${t.slice(0, 80)}::${a.split(' ')[0] || ''}`;
 }
 
+function isLikelyMusicResult(item: Suggestion): boolean {
+  const t = (item.title || '').toLowerCase();
+  const a = (item.artist || '').toLowerCase();
+  const s = `${t} ${a}`;
+
+  const musicSignals = [
+    'official song', 'audio', 'lyrical', 'lyrics', 'music', 'album', 'ost', 'single',
+    'records', 'music', 'entertainment', 'vevo', 't-series', 'saregama', 'sony music',
+    'zee music', 'aditya music', 'lahari', 'tips', 'think music', 'wynk', 'gaana', 'jiosaavn',
+    'anirudh', 'ar rahman', 'devi sri prasad', 'sid sriram',
+  ];
+  const nonMusicSignals = [
+    'vlog', 'news', 'live stream', 'gameplay', 'walkthrough', 'review', 'reaction',
+    'transform', 'vs ', 'truck', 'car', 'auto', 'tractor', 'travel', 'cooking',
+    'comedy', 'prank', 'unboxing', 'shorts', 'status', 'interview',
+  ];
+
+  const hasMusicSignal = musicSignals.some((x) => s.includes(x));
+  const hasNonMusicSignal = nonMusicSignals.some((x) => s.includes(x));
+
+  // Strong rule: reject obvious non-music even if it accidentally has "audio" somewhere.
+  if (hasNonMusicSignal) return false;
+
+  // Accept clear music entities/labels or music-ish titles.
+  if (hasMusicSignal) return true;
+  if (/\b(song|audio|lyrical|lyrics|album|theme|jukebox|ost)\b/i.test(t)) return true;
+
+  // Fallback strict reject.
+  return false;
+}
+
 function extractYouTubeId(input: string): string | null {
   const text = input.trim();
   const direct = text.match(/^[a-zA-Z0-9_-]{11}$/);
@@ -377,12 +408,13 @@ function RoomHomePanel({
 
   useEffect(() => {
     let mounted = true;
-    const salt = Math.floor(Math.random() * 100000);
+    const flavor = refreshTick % 6;
+    const facets = ['latest official songs', 'new music releases', 'top movie songs', 'official lyrical songs', 'audio jukebox', 'best hits'];
     const queries = [
-      `${language} latest songs ${salt}`,
-      `${language} top hits playlist ${salt % 7}`,
-      `${language} trending music ${salt % 11}`,
-      `${language} romantic songs ${salt % 5}`,
+      `${language} ${facets[flavor]}`,
+      `${language} official songs`,
+      `${language} music label hits`,
+      `${language} album songs`,
     ];
 
     setLoading(true);
@@ -393,8 +425,7 @@ function RoomHomePanel({
         const seenLocal = new Set<string>();
         let deduped = merged.filter((x) => {
           const key = canonicalSongKey(x.title || '', x.artist || '');
-          const noisy = /reaction|review|status|shorts?/i.test(`${x.title || ''} ${x.artist || ''}`);
-          if (!x?.id || noisy || seenLocal.has(key) || shownKeysRef.current.has(key)) return false;
+          if (!x?.id || !isLikelyMusicResult(x) || seenLocal.has(key) || shownKeysRef.current.has(key)) return false;
           seenLocal.add(key);
           return true;
         });
@@ -404,8 +435,7 @@ function RoomHomePanel({
           shownKeysRef.current.clear();
           deduped = merged.filter((x) => {
             const key = canonicalSongKey(x.title || '', x.artist || '');
-            const noisy = /reaction|review|status|shorts?/i.test(`${x.title || ''} ${x.artist || ''}`);
-            if (!x?.id || noisy || seenLocal.has(key)) return false;
+            if (!x?.id || !isLikelyMusicResult(x) || seenLocal.has(key)) return false;
             seenLocal.add(key);
             return true;
           });
