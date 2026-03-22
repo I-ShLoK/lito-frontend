@@ -1,0 +1,141 @@
+@import url('https://api.fontshare.com/v2/css?f[]=clash-display@500,600,700&display=swap');
+@import url('https://api.fontshare.com/v2/css?f[]=satoshi@400,500,700&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500&display=swap');
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --bg: #0b1113;
+  --surface: #121a1f;
+  --elevated: #1a242c;
+  --accent: #95ca57;
+  --accent-dim: #5f8746;
+  --text-1: #f1f6f7;
+  --text-2: #a8b4b8;
+  --text-3: #6f7d84;
+  --border: #24323b;
+  --radius: 16px;
+}
+
+[data-theme='mono'] {
+  --bg: #020303;
+  --surface: #0a0d0e;
+  --elevated: #111518;
+  --accent: #ffffff;
+  --accent-dim: #8a8a8a;
+  --text-1: #ffffff;
+  --text-2: #9a9a9a;
+  --text-3: #5a5a5a;
+  --border: #1b1f21;
+}
+
+*, *::before, *::after { box-sizing: border-box; }
+
+html {
+  background: radial-gradient(1200px 800px at 20% 0%, #12342f55 0%, transparent 60%),
+              radial-gradient(900px 600px at 90% 20%, #1a2f3555 0%, transparent 70%),
+              var(--bg);
+  color: var(--text-1);
+  font-family: 'Satoshi', system-ui, sans-serif;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+body {
+  background: transparent;
+  color: var(--text-1);
+  overflow-x: hidden;
+}
+
+h1, h2, h3, .font-display { font-family: 'Clash Display', system-ui, sans-serif; }
+
+::-webkit-scrollbar { width: 6px; height: 6px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: var(--border); border-radius: 99px; }
+
+@keyframes waveform-pulse {
+  0%, 100% { transform: scaleY(0.3); }
+  50% { transform: scaleY(1); }
+}
+.waveform-bar {
+  width: 3px;
+  border-radius: 99px;
+  background: var(--accent);
+  transform-origin: bottom;
+  animation: waveform-pulse 1s ease-in-out infinite;
+}
+.waveform-bar.paused { animation-play-state: paused; transform: scaleY(0.3); }
+
+@keyframes mesh-drift {
+  0%   { transform: translate(0, 0) scale(1); }
+  33%  { transform: translate(-20px, 22px) scale(1.04); }
+  66%  { transform: translate(16px, -18px) scale(0.96); }
+  100% { transform: translate(0, 0) scale(1); }
+}
+
+.mesh-bg {
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  overflow: hidden;
+  z-index: 0;
+}
+
+.mesh-blob {
+  position: absolute;
+  border-radius: 50%;
+  filter: blur(80px);
+  animation: mesh-drift 18s ease-in-out infinite;
+  opacity: 0.13;
+}
+
+.glass {
+  background: color-mix(in srgb, var(--surface) 84%, transparent);
+  backdrop-filter: blur(18px);
+  border: 1px solid color-mix(in srgb, var(--border) 85%, #ffffff11);
+}
+
+.apple-glass {
+  background:
+    linear-gradient(135deg, rgba(255, 255, 255, 0.09) 0%, rgba(255, 255, 255, 0.03) 38%, rgba(255, 255, 255, 0.01) 100%),
+    color-mix(in srgb, var(--surface) 74%, transparent);
+  backdrop-filter: blur(22px) saturate(135%);
+  -webkit-backdrop-filter: blur(22px) saturate(135%);
+  border: 1px solid color-mix(in srgb, #ffffff 16%, var(--border));
+  box-shadow:
+    0 18px 40px rgba(0, 0, 0, 0.28),
+    inset 0 1px 0 rgba(255, 255, 255, 0.2),
+    0 0 0 1px rgba(255, 255, 255, 0.04);
+}
+
+.glow-accent {
+  position: relative;
+}
+
+.glow-accent::before {
+  content: '';
+  position: absolute;
+  inset: -1px;
+  border-radius: inherit;
+  background: radial-gradient(100% 80% at 50% 0%, rgba(149, 202, 87, 0.2), rgba(149, 202, 87, 0) 70%);
+  pointer-events: none;
+}
+
+@keyframes skeleton-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.42; }
+}
+.skeleton {
+  background: var(--elevated);
+  border-radius: var(--radius);
+  animation: skeleton-pulse 1.5s ease-in-out infinite;
+}
+
+.truncate-2 {
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
