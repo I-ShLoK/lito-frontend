@@ -850,7 +850,7 @@ function SmartQueuePanel({
 }
 
 function PlayerCore({
-  isHostOrDj,
+  canControlMusic,
   seekValue,
   onSeekPreview,
   onSeekCommit,
@@ -865,7 +865,7 @@ function PlayerCore({
   onSeekStart,
   onSeekEnd,
 }: {
-  isHostOrDj: boolean;
+  canControlMusic: boolean;
   seekValue: number;
   onSeekPreview: (v: number) => void;
   onSeekCommit: (v: number) => void;
@@ -909,7 +909,7 @@ function PlayerCore({
             onMouseDown={onSeekStart}
             onTouchStart={onSeekStart}
             onPointerUp={onSeekEnd}
-            disabled={!isHostOrDj}
+            disabled={!canControlMusic}
           />
           <div className="flex justify-between text-xs text-t3 font-mono mt-1">
             <span>{formatTime(seekValue)}</span>
@@ -920,12 +920,12 @@ function PlayerCore({
         <div className="flex justify-center mb-3"><Visualizer isPlaying={playbackState.isPlaying} bars={28} /></div>
 
         <div className="flex items-center justify-center gap-6">
-          <button onClick={onShuffle} disabled={!isHostOrDj} className="p-2 text-t3 disabled:opacity-30">↺</button>
-          <button onClick={onSkipPrev} disabled={!isHostOrDj} className="p-2 text-t2 disabled:opacity-30">⏮</button>
-          <button onClick={playbackState.isPlaying ? onPause : onPlay} disabled={!isHostOrDj} className="w-14 h-14 rounded-full bg-accent text-bg text-2xl disabled:opacity-30">
+          <button onClick={onShuffle} disabled={!canControlMusic} className="p-2 text-t3 disabled:opacity-30">↺</button>
+          <button onClick={onSkipPrev} disabled={!canControlMusic} className="p-2 text-t2 disabled:opacity-30">⏮</button>
+          <button onClick={playbackState.isPlaying ? onPause : onPlay} disabled={!canControlMusic} className="w-14 h-14 rounded-full bg-accent text-bg text-2xl disabled:opacity-30">
             {playbackState.isPlaying ? '❚❚' : '▶'}
           </button>
-          <button onClick={onSkipNext} disabled={!isHostOrDj} className="p-2 text-t2 disabled:opacity-30">⏭</button>
+          <button onClick={onSkipNext} disabled={!canControlMusic} className="p-2 text-t2 disabled:opacity-30">⏭</button>
           <button onClick={() => setShowSecondaryControls((v) => !v)} className="p-2 text-t3">⋯</button>
         </div>
 
@@ -938,7 +938,7 @@ function PlayerCore({
               className="mt-2 flex items-center justify-center gap-3"
             >
               <button onClick={onToggleLoop} className={`px-3 py-1.5 rounded-lg text-xs ${playbackState.isLooping ? 'bg-accent text-bg' : 'bg-elevated text-t2'}`}>Loop</button>
-              <button onClick={onShuffle} disabled={!isHostOrDj} className="px-3 py-1.5 rounded-lg text-xs bg-elevated text-t2 disabled:opacity-30">Shuffle</button>
+              <button onClick={onShuffle} disabled={!canControlMusic} className="px-3 py-1.5 rounded-lg text-xs bg-elevated text-t2 disabled:opacity-30">Shuffle</button>
             </motion.div>
           )}
         </AnimatePresence>
@@ -967,10 +967,10 @@ export default function RoomPage() {
 
   const {
     token, userId,
-    roomId, roomName, hostId, djMode,
+    roomId, roomName, hostId,
     currentTrack, queue, playbackState, localPositionMs,
     setRoom, clearRoom, setCurrentTrack, setPlaybackState,
-    setQueue, setParticipants, setDjMode, setMessages, messages, participants,
+    setQueue, setParticipants, setMessages, messages, participants,
   } = useStore();
 
   const [loading, setLoading] = useState(true);
@@ -1008,8 +1008,7 @@ export default function RoomPage() {
   const smartQueueAutoRef = useRef('');
   const playedCanonRef = useRef<string[]>([]);
   const drawerResizeRef = useRef<'left' | 'right' | null>(null);
-  const isHost = userId === hostId;
-  const isHostOrDj = isHost || djMode;
+  const canControlMusic = true;
   const roomArtists = useMemo(() => {
     const map = new Map<string, number>();
     for (const item of queue) {
@@ -1031,7 +1030,7 @@ export default function RoomPage() {
   const {
     timeOffsetRef, joinRoom, leaveRoom,
     play, pause, seek, skipNext, skipPrev,
-    shuffleQueue, toggleLoop, sendChat, toggleDjMode, trackEnded, syncRequest,
+    shuffleQueue, toggleLoop, sendChat, trackEnded, syncRequest,
     addToQueue, removeFromQueue, reorderQueue, clearQueue,
     connectionState,
   } = useSocket();
@@ -1039,10 +1038,7 @@ export default function RoomPage() {
   useAudio({
     volume,
     timeOffsetRef,
-    onTrackEnded: (endedTrackId?: string) => {
-      if (!isHostOrDj) return;
-      trackEnded(endedTrackId);
-    },
+    onTrackEnded: (endedTrackId?: string) => trackEnded(endedTrackId),
     onPlay: play,
     onPause: pause,
   });
@@ -1094,8 +1090,6 @@ export default function RoomPage() {
           username: String(p.username),
           joinedAt: String(p.joined_at),
         })));
-
-        setDjMode(Boolean(room.djMode || false));
 
         if (room.queue?.length > 0) {
           const activeYoutubeId = room.playbackState?.trackId ? String(room.playbackState.trackId) : null;
@@ -1308,7 +1302,7 @@ export default function RoomPage() {
       toast('Tip: swipe left or right to switch Room / Player / Chat.', { duration: 3600 });
       window.localStorage.setItem('lito-tip-swipe-tabs', '1');
     }
-    if (isHostOrDj && !window.localStorage.getItem('lito-tip-queue-drag')) {
+    if (!window.localStorage.getItem('lito-tip-queue-drag')) {
       toast('Tip: drag queue rows to reorder instantly.', { duration: 3200 });
       window.localStorage.setItem('lito-tip-queue-drag', '1');
     }
@@ -1316,7 +1310,7 @@ export default function RoomPage() {
       toast('Tip: paste YouTube/Spotify playlist links in search to import.', { duration: 3400 });
       window.localStorage.setItem('lito-tip-playlist-import', '1');
     }
-  }, [isMobile, isHostOrDj]);
+  }, [isMobile]);
 
   useEffect(() => {
     if (isMobile) return;
@@ -1352,8 +1346,6 @@ export default function RoomPage() {
         return;
       }
 
-      if (!isHostOrDj) return;
-
       if (e.code === 'Space') {
         e.preventDefault();
         triggerHaptic();
@@ -1376,7 +1368,7 @@ export default function RoomPage() {
 
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [isMobile, isHostOrDj, playbackState.isPlaying, localPositionMs, currentTrack?.durationMs, play, pause, seek, skipNext, skipPrev, triggerHaptic]);
+  }, [isMobile, playbackState.isPlaying, localPositionMs, currentTrack?.durationMs, play, pause, seek, skipNext, skipPrev, triggerHaptic]);
 
   useEffect(() => {
     if (!chatInitializedRef.current) {
@@ -1433,7 +1425,7 @@ export default function RoomPage() {
   }, [currentTrack, currentTrack?.youtubeId, queue, roomArtists, roomId]);
 
   useEffect(() => {
-    if (!smartQueueEnabled || !isHostOrDj) return;
+    if (!smartQueueEnabled) return;
     if (!currentTrack || !playbackState.isPlaying) return;
     // queue includes currently playing track at index 0. Auto-fill when only current is left.
     if (queue.length > 1) {
@@ -1484,11 +1476,11 @@ export default function RoomPage() {
     };
 
     void autoInsert();
-  }, [smartQueueEnabled, isHostOrDj, currentTrack, currentTrack?.youtubeId, playbackState.isPlaying, queue.length, smartQueueItems, userId, setQueue, addToQueue]);
+  }, [smartQueueEnabled, currentTrack, currentTrack?.youtubeId, playbackState.isPlaying, queue.length, smartQueueItems, userId, setQueue, addToQueue]);
 
   const handleSeekCommit = (value: number) => {
     setDraggingSeek(false);
-    if (isHostOrDj) seek(value);
+    seek(value);
   };
   const handleSeekStart = () => {
     setDraggingSeek(true);
@@ -1676,7 +1668,6 @@ export default function RoomPage() {
                     <p className="text-xs text-t3">Room home</p>
                   </div>
                   <div className="flex items-center gap-2">
-                    {isHost && <button onClick={toggleDjMode} className="text-xs px-2 py-1 rounded-lg bg-elevated text-t2">DJ</button>}
                     <button onClick={handleLeave} className="text-xs px-2 py-1 rounded-lg bg-elevated text-t2">Leave</button>
                   </div>
                 </div>
@@ -1721,7 +1712,7 @@ export default function RoomPage() {
                 <div className="apple-glass rounded-2xl overflow-hidden">
                   <div className="px-3 py-2">
                     <PlayerCore
-                      isHostOrDj={isHostOrDj}
+                      canControlMusic={canControlMusic}
                       seekValue={seekValue}
                       onSeekPreview={(v) => { setDraggingSeek(true); setSeekValue(v); }}
                       onSeekCommit={handleSeekCommit}
@@ -1804,7 +1795,6 @@ export default function RoomPage() {
                         onAddToQueue={addToQueueFromSearch}
                         onRemoveFromQueue={(id) => { triggerHaptic(10); removeFromQueue(id); }}
                         onReorderQueue={reorderQueue}
-                        isHostOrDj={isHostOrDj}
                         showSearch={false}
                         onRequestSearch={() => setMobilePlayerPanel('search')}
                         smartQueueItems={smartQueueItems}
@@ -1878,7 +1868,6 @@ export default function RoomPage() {
               {connectionState === 'synced' ? 'Synced' : 'Reconnecting'}
             </div>
             <InstallAppButton compact />
-            {isHost && <button onClick={toggleDjMode} className="px-3 py-1.5 rounded-lg bg-elevated text-t2">DJ</button>}
             <button onClick={handleLeave} className="px-3 py-1.5 rounded-lg bg-elevated text-t2">Leave</button>
           </div>
         </div>
@@ -1912,7 +1901,6 @@ export default function RoomPage() {
                           onAddToQueue={addToQueueFromSearch}
                           onRemoveFromQueue={removeFromQueue}
                           onReorderQueue={reorderQueue}
-                          isHostOrDj={isHostOrDj}
                           showSearch={false}
                           onRequestSearch={() => setDesktopLeftTab('search')}
                           showSmartQueueSection={false}
@@ -2000,7 +1988,7 @@ export default function RoomPage() {
           >
             <div className="apple-glass rounded-3xl p-5 w-full" style={{ maxWidth: desktopPlayerMaxWidth }}>
               <PlayerCore
-                isHostOrDj={isHostOrDj}
+                canControlMusic={canControlMusic}
                 seekValue={seekValue}
                 onSeekPreview={(v) => { setDraggingSeek(true); setSeekValue(v); }}
                 onSeekCommit={handleSeekCommit}

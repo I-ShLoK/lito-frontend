@@ -25,7 +25,6 @@ interface QueueProps {
   }) => void;
   onRemoveFromQueue: (id: string) => void;
   onReorderQueue?: (id: string, newIndex: number) => void;
-  isHostOrDj: boolean;
   showSearch?: boolean;
   onRequestSearch?: () => void;
   smartQueueItems?: VideoResult[];
@@ -47,7 +46,7 @@ function formatDuration(ms: number): string {
 
 export default function Queue({
   onAddToQueue, onRemoveFromQueue, onReorderQueue,
-  isHostOrDj, showSearch = true, onRequestSearch,
+  showSearch = true, onRequestSearch,
   smartQueueItems = [], smartQueueEnabled = true, smartQueueLoading = false,
   onToggleSmartQueueEnabled, showSmartQueueSection = true,
   onClearQueue, canClearQueue = false,
@@ -283,19 +282,20 @@ export default function Queue({
                   {visibleQueue.map((item, offset) => {
                     const i = startIndex + offset;
                     const isCurrent = currentTrack?.youtubeId === item.youtubeId && i === 0;
-                    const canRemove = isHostOrDj || item.addedBy === userId;
+                    const canManageQueue = true;
+                    const canRemove = canManageQueue || item.addedBy === userId;
 
                     return (
                       <motion.div
                         key={item.id}
-                        draggable={isHostOrDj}
+                        draggable={canManageQueue}
                         onDragStart={() => setDraggingId(item.id)}
-                        onDragOver={(e) => { if (!isHostOrDj || !onReorderQueue) return; e.preventDefault(); }}
+                        onDragOver={(e) => { if (!canManageQueue || !onReorderQueue) return; e.preventDefault(); }}
                         onDrop={() => handleDrop(item.id)}
                         onDragEnd={() => setDraggingId(null)}
-                        onContextMenu={(e) => { if (!isHostOrDj) return; e.preventDefault(); setMenuTargetId(item.id); }}
+                        onContextMenu={(e) => { if (!canManageQueue) return; e.preventDefault(); setMenuTargetId(item.id); }}
                         onTouchStart={() => {
-                          if (!isHostOrDj) return;
+                          if (!canManageQueue) return;
                           if (longPressTimerRef.current) clearTimeout(longPressTimerRef.current);
                           longPressTimerRef.current = setTimeout(() => { setMenuTargetId(item.id); triggerHaptic(); }, 480);
                         }}
@@ -320,7 +320,7 @@ export default function Queue({
                             : i + 1}
                         </span>
 
-                        {isHostOrDj && onReorderQueue && (
+                        {canManageQueue && onReorderQueue && (
                           <span className="text-xs select-none cursor-grab active:cursor-grabbing opacity-50" style={{ color: 'var(--text-3)' }}>⋮⋮</span>
                         )}
 
@@ -417,7 +417,7 @@ export default function Queue({
 
       {/* Context menu */}
       <AnimatePresence>
-        {menuTargetId && isHostOrDj && (
+        {menuTargetId && (
           <motion.div
             initial={{ opacity: 0, y: 8 }}
             animate={{ opacity: 1, y: 0 }}

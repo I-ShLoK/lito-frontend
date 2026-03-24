@@ -32,7 +32,7 @@ export function useSocket() {
   const {
     token, userId,
     setQueue, setCurrentTrack, setPlaybackState,
-    addMessage, setParticipants, setDjMode, markTrackUnplayable,
+    addMessage, setParticipants, markTrackUnplayable,
     setHost, addParticipant, removeParticipant, roomId,
     updateLocalPosition,
   } = useStore();
@@ -142,18 +142,16 @@ export function useSocket() {
       setConnectionState('reconnecting');
     });
 
-    socket.on('ROOM_STATE', ({ playbackState, queue, participants, djMode }: {
+    socket.on('ROOM_STATE', ({ playbackState, queue, participants }: {
       playbackState: PlaybackState;
       queue: Record<string, unknown>[];
       participants: Participant[];
-      djMode: boolean;
     }) => {
       const mappedQueue = mapQueueItems(queue);
       setPlaybackState(playbackState);
       setQueue(mappedQueue);
       setCurrentTrack(resolveCurrentTrackFromState(mappedQueue, playbackState.trackId));
       setParticipants(participants);
-      setDjMode(djMode);
     });
 
     socket.on('QUEUE_UPDATED', ({ queue }: { queue: Record<string, unknown>[] }) => {
@@ -220,11 +218,6 @@ export function useSocket() {
       addMessage(msg);
     });
 
-    socket.on('TOGGLE_DJ_MODE', ({ djMode }: { djMode: boolean }) => {
-      setDjMode(djMode);
-      toast(djMode ? '⚡ DJ Mode ON — everyone can control' : '🎧 DJ Mode OFF', { duration: 3000 });
-    });
-
     socket.on('TRACK_UNPLAYABLE', ({ trackId, reason }: { trackId: string; reason: string }) => {
       markTrackUnplayable(trackId);
       toast.error(`⚠️ ${reason}`, { duration: 5000 });
@@ -250,14 +243,13 @@ export function useSocket() {
       socket.off('PARTICIPANT_LEFT');
       socket.off('HOST_CHANGED');
       socket.off('CHAT_MESSAGE');
-      socket.off('TOGGLE_DJ_MODE');
       socket.off('TRACK_UNPLAYABLE');
       socket.off('ERROR');
       socket.off('disconnect');
       socket.off('connect_error');
     };
   }, [token, roomId, getSocket, setQueue, setCurrentTrack, setPlaybackState,
-      addMessage, setParticipants, setDjMode, markTrackUnplayable,
+      addMessage, setParticipants, markTrackUnplayable,
       setHost, addParticipant, removeParticipant, updateLocalPosition, doNtpSync, resolveCurrentTrackFromState]);
 
   useEffect(() => {
@@ -297,7 +289,6 @@ export function useSocket() {
   const shuffleQueue = useCallback(() => emit('SHUFFLE_QUEUE'), [emit]);
   const toggleLoop = useCallback(() => emit('TOGGLE_LOOP'), [emit]);
   const sendChat = useCallback((message: string) => emit('CHAT', { message }), [emit]);
-  const toggleDjMode = useCallback(() => emit('TOGGLE_DJ_MODE'), [emit]);
   const trackEnded = useCallback((endedTrackId?: string) => emit('TRACK_ENDED', { endedTrackId }), [emit]);
   const syncRequest = useCallback(() => {
     const socket = socketRef.current || getSocket();
@@ -321,7 +312,7 @@ export function useSocket() {
     timeOffsetRef,
     joinRoom, leaveRoom, play, pause, seek,
     skipNext, skipPrev, shuffleQueue, toggleLoop, sendChat,
-    toggleDjMode, trackEnded, syncRequest,
+    trackEnded, syncRequest,
     addToQueue, removeFromQueue, reorderQueue,
     clearQueue,
     connectionState,

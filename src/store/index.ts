@@ -59,7 +59,6 @@ interface Store {
   roomSlug: string | null;
   roomName: string | null;
   hostId: string | null;
-  djMode: boolean;
   participants: Participant[];
   messages: Message[];
 
@@ -86,7 +85,6 @@ interface Store {
   addMessage: (msg: Message) => void;
   setMessages: (messages: Message[]) => void;
   setParticipants: (p: Participant[]) => void;
-  setDjMode: (enabled: boolean) => void;
   markTrackUnplayable: (trackId: string) => void;
   setHost: (hostId: string) => void;
   addParticipant: (p: Participant) => void;
@@ -116,7 +114,6 @@ export const useStore = create<Store>()(
       roomSlug: null,
       roomName: null,
       hostId: null,
-      djMode: false,
       participants: [],
       messages: [],
 
@@ -146,7 +143,7 @@ export const useStore = create<Store>()(
       clearRoom: () =>
         set({
           roomId: null, roomSlug: null, roomName: null, hostId: null,
-          djMode: false, participants: [], messages: [],
+          participants: [], messages: [],
           currentTrack: null, queue: [],
           playbackState: defaultPlaybackState, localPositionMs: 0,
           unplayableTracks: new Set(),
@@ -160,7 +157,6 @@ export const useStore = create<Store>()(
       setMessages: (messages) =>
         set({ messages: messages.slice(-500) }),
       setParticipants: (participants) => set({ participants }),
-      setDjMode: (djMode) => set({ djMode }),
       markTrackUnplayable: (trackId) =>
         set((s) => {
           const next = new Set(Array.from(s.unplayableTracks));

@@ -12,7 +12,7 @@ function getInitialColor(username: string): string {
 }
 
 export default function People() {
-  const { participants, hostId, djMode } = useStore();
+  const { participants, hostId } = useStore();
 
   return (
     <div className="overflow-y-auto h-full px-3 py-3">
@@ -57,18 +57,6 @@ export default function People() {
                     }}
                   >
                     Host
-                  </span>
-                )}
-                {djMode && !isHost && (
-                  <span
-                    className="pill"
-                    style={{
-                      fontSize: 10,
-                      paddingTop: 2, paddingBottom: 2,
-                      paddingLeft: 7, paddingRight: 7,
-                    }}
-                  >
-                    DJ
                   </span>
                 )}
               </div>
