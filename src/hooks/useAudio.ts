@@ -6,8 +6,6 @@ import { useStore } from '@/store';
 const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3011';
 
 interface UseAudioOptions {
-  isHost: boolean;
-  djMode: boolean;
   volume: number;
   timeOffsetRef: React.MutableRefObject<number>;
   onTrackEnded: (endedTrackId?: string) => void;
@@ -16,8 +14,6 @@ interface UseAudioOptions {
 }
 
 export function useAudio({
-  isHost,
-  djMode,
   volume,
   timeOffsetRef,
   onTrackEnded,
@@ -270,7 +266,7 @@ export function useAudio({
         return;
       }
 
-      if (consecutiveErrorRef.current >= 2 && (isHost || djMode)) {
+      if (consecutiveErrorRef.current >= 2) {
         onTrackEnded(currentTrack?.youtubeId);
         return;
       }
@@ -291,9 +287,7 @@ export function useAudio({
     };
 
     const handleEnded = () => {
-      if (isHost || djMode) {
-        onTrackEnded(currentTrack?.youtubeId);
-      }
+      onTrackEnded(currentTrack?.youtubeId);
     };
 
     const recoverPlayback = () => {
@@ -337,7 +331,7 @@ export function useAudio({
       audio.removeEventListener('stalled', handleStalled);
       audio.removeEventListener('pause', handlePause);
     };
-  }, [playbackState, isHost, djMode, onTrackEnded, getExpected, currentTrack, currentTrack?.youtubeId]);
+  }, [playbackState, onTrackEnded, getExpected, currentTrack, currentTrack?.youtubeId]);
 
   // MediaSession API
   useEffect(() => {
@@ -360,7 +354,7 @@ export function useAudio({
     navigator.mediaSession.setActionHandler('nexttrack', () => {
       // Handled by socket skipNext
     });
-  }, [currentTrack, currentTrack?.youtubeId, isHost, djMode, onPlay, onPause]);
+  }, [currentTrack, currentTrack?.youtubeId, onPlay, onPause]);
 
   const togglePlayPause = useCallback(() => {
     const audio = audioRef.current;

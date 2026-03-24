@@ -1009,7 +1009,7 @@ export default function RoomPage() {
   const playedCanonRef = useRef<string[]>([]);
   const drawerResizeRef = useRef<'left' | 'right' | null>(null);
   const isHost = userId === hostId;
-  const isHostOrDj = isHost || djMode;
+  const isHostOrDj = true;
   const roomArtists = useMemo(() => {
     const map = new Map<string, number>();
     for (const item of queue) {
@@ -1036,7 +1036,7 @@ export default function RoomPage() {
     connectionState,
   } = useSocket();
 
-  useAudio({ isHost, djMode, volume, timeOffsetRef, onTrackEnded: trackEnded, onPlay: play, onPause: pause });
+  useAudio({ volume, timeOffsetRef, onTrackEnded: trackEnded, onPlay: play, onPause: pause });
 
   // Adaptive colour — tints the whole UI to match the current track's artwork
   useAdaptiveColor(currentTrack?.thumbnailUrl);
@@ -1495,7 +1495,6 @@ export default function RoomPage() {
     router.push('/browse');
   };
   const clearEntireQueue = () => {
-    if (!isHostOrDj) return;
     const ok = typeof window === 'undefined' ? true : window.confirm('Clear the entire queue? This will stop current playback.');
     if (!ok) return;
     clearQueue();
@@ -1803,7 +1802,7 @@ export default function RoomPage() {
                         smartQueueEnabled={smartQueueEnabled}
                         smartQueueLoading={smartQueueLoading}
                         onToggleSmartQueueEnabled={() => setSmartQueueEnabled((v) => !v)}
-                        canClearQueue={isHostOrDj}
+                        canClearQueue
                         onClearQueue={clearEntireQueue}
                       />
                     )}
@@ -1908,7 +1907,7 @@ export default function RoomPage() {
                           showSearch={false}
                           onRequestSearch={() => setDesktopLeftTab('search')}
                           showSmartQueueSection={false}
-                          canClearQueue={isHostOrDj}
+                          canClearQueue
                           onClearQueue={clearEntireQueue}
                         />
                       </div>
