@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useEffect, useCallback } from 'react';
-import { motion } from 'framer-motion';
+import { motion, AnimatePresence } from 'framer-motion';
 import { useRouter } from 'next/navigation';
 import toast from 'react-hot-toast';
 import { useStore } from '@/store';
@@ -55,7 +55,7 @@ export default function BrowsePage() {
 
   useEffect(() => {
     fetchRooms();
-    const interval = setInterval(fetchRooms, 10000);
+    const interval = setInterval(fetchRooms, 10_000);
     return () => clearInterval(interval);
   }, [fetchRooms]);
 
@@ -74,91 +74,205 @@ export default function BrowsePage() {
   };
 
   const handleLogout = async () => {
-    try {
-      await api.post('/api/auth/leave');
-    } catch {
-      // ignore
-    }
+    try { await api.post('/api/auth/leave'); } catch { /* ignore */ }
     clearAuth();
     router.replace('/');
   };
 
+  const [featured, ...rest] = rooms;
+
   return (
-    <div className="min-h-screen bg-bg relative overflow-hidden">
+    <div className="min-h-screen relative overflow-hidden" style={{ background: 'var(--bg)' }}>
+
+      {/* Ambient blobs */}
       <div className="mesh-bg" aria-hidden>
-        <div className="mesh-blob w-[28rem] h-[28rem] -top-24 -left-28" style={{ background: 'var(--accent)' }} />
-        <div className="mesh-blob w-[26rem] h-[26rem] top-1/2 -right-24" style={{ background: 'var(--accent-dim)' }} />
+        <div className="mesh-blob" style={{ width: '30rem', height: '30rem', top: '-8rem', left: '-10rem', background: 'var(--accent)' }} />
+        <div className="mesh-blob" style={{ width: '24rem', height: '24rem', bottom: '10%', right: '-8rem', background: 'var(--accent-dim)', animationDelay: '-10s' }} />
       </div>
 
-      <header className="border-b border-[var(--border)] bg-surface/80 backdrop-blur-xl sticky top-0 z-10">
+      {/* ── Header ─────────────────────────────────────────────────────── */}
+      <header
+        className="sticky top-0 z-30 border-b"
+        style={{ background: 'color-mix(in srgb, var(--bg) 85%, transparent)', backdropFilter: 'blur(20px)', borderColor: 'var(--border)' }}
+      >
         <div className="max-w-6xl mx-auto px-4 h-14 flex items-center justify-between">
-          <h1 className="font-display text-xl font-700 text-t1">Li<span className="text-accent">To</span></h1>
-          <div className="flex items-center gap-2 sm:gap-3">
-            <span className="text-sm text-t2 hidden sm:block">{username}</span>
+          <h1 className="font-display text-xl tracking-tight" style={{ color: 'var(--text-1)' }}>
+            Li<span style={{ color: 'var(--accent)' }}>To</span>
+          </h1>
+
+          <div className="flex items-center gap-2">
+            {/* Username pill */}
+            <span
+              className="hidden sm:flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-medium"
+              style={{ background: 'var(--elevated)', color: 'var(--text-2)', border: '1px solid var(--border)' }}
+            >
+              <span
+                className="w-1.5 h-1.5 rounded-full live-dot"
+                style={{ background: 'var(--accent)' }}
+              />
+              {username}
+            </span>
+
             <InstallAppButton compact />
-            <button onClick={toggleTheme} className="text-t2 hover:text-t1 transition-colors">?</button>
-            <button onClick={() => setShowCreate(true)} className="px-4 py-1.5 bg-accent text-bg rounded-full text-sm font-medium hover:opacity-80 transition-opacity">
+
+            <button
+              onClick={toggleTheme}
+              className="w-8 h-8 rounded-xl flex items-center justify-center text-base transition-opacity hover:opacity-70"
+              style={{ background: 'var(--elevated)', color: 'var(--text-2)' }}
+            >
+              ◐
+            </button>
+
+            <button
+              onClick={() => setShowCreate(true)}
+              className="btn-accent px-4 py-1.5 text-sm"
+            >
               + Create
             </button>
-            <button onClick={handleLogout} className="text-sm text-t3 hover:text-t1 transition-colors">Leave</button>
+
+            <button
+              onClick={handleLogout}
+              className="text-sm transition-colors hover:opacity-80"
+              style={{ color: 'var(--text-3)' }}
+            >
+              Leave
+            </button>
           </div>
         </div>
       </header>
 
-      <main className="max-w-6xl mx-auto px-4 py-6 relative z-[1]">
-        {!loading && rooms.length > 0 && (
-          <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} className="mb-6">
-            <p className="text-xs text-t3 uppercase tracking-widest mb-3">Most Active</p>
-            <RoomCard {...rooms[0]} />
-          </motion.div>
+      {/* ── Main ───────────────────────────────────────────────────────── */}
+      <main className="max-w-6xl mx-auto px-4 py-8 relative z-10">
+
+        {/* Featured / Most Active */}
+        {!loading && featured && (
+          <motion.section
+            initial={{ opacity: 0, y: 10 }}
+            animate={{ opacity: 1, y: 0 }}
+            className="mb-10"
+          >
+            <SectionLabel>🔥 Most Active</SectionLabel>
+            <RoomCard {...featured} featured />
+          </motion.section>
         )}
 
-        <div>
-          <p className="text-xs text-t3 uppercase tracking-widest mb-3">All Rooms</p>
+        {loading && (
+          <div className="mb-10">
+            <SectionLabel>🔥 Most Active</SectionLabel>
+            <RoomCardSkeleton featured />
+          </div>
+        )}
+
+        {/* All rooms grid */}
+        <section>
+          <div className="flex items-center justify-between mb-4">
+            <SectionLabel>All Rooms</SectionLabel>
+            <span className="text-xs" style={{ color: 'var(--text-3)' }}>
+              {!loading && `${rooms.length} live`}
+            </span>
+          </div>
+
           {loading ? (
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-3">
-              {Array.from({ length: 8 }).map((_, i) => <RoomCardSkeleton key={i} compact />)}
+              {Array.from({ length: 8 }).map((_, i) => <RoomCardSkeleton key={i} />)}
             </div>
-          ) : rooms.length === 0 ? (
-            <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="text-center py-20 text-t3">
-              <p className="text-4xl mb-3">Music rooms are empty</p>
-              <p>Create one and invite your friends.</p>
+          ) : rest.length === 0 && !featured ? (
+            <motion.div
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              className="flex flex-col items-center justify-center py-24 gap-3"
+              style={{ color: 'var(--text-3)' }}
+            >
+              <span className="text-5xl">🎵</span>
+              <p className="text-lg font-display">No rooms yet</p>
+              <p className="text-sm">Create one and invite your friends.</p>
+              <button onClick={() => setShowCreate(true)} className="btn-accent px-5 py-2 text-sm mt-2">
+                Create a Room
+              </button>
             </motion.div>
           ) : (
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-3">
-              {rooms.slice(1).map((room, i) => (
-                <motion.div key={room.id} initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: i * 0.04 }}>
-                  <RoomCard {...room} compact />
+              {rest.map((room, i) => (
+                <motion.div
+                  key={room.id}
+                  initial={{ opacity: 0, y: 8 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  transition={{ delay: i * 0.04 }}
+                >
+                  <RoomCard {...room} />
                 </motion.div>
               ))}
             </div>
           )}
-        </div>
+        </section>
       </main>
 
-      {showCreate && (
-        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-          <motion.div initial={{ opacity: 0, scale: 0.96 }} animate={{ opacity: 1, scale: 1 }} className="bg-surface border border-[var(--border)] rounded-[var(--radius)] p-5 w-full max-w-sm">
-            <h2 className="font-display text-lg mb-4">Create a Room</h2>
-            <input
-              type="text"
-              value={roomName}
-              onChange={(e) => setRoomName(e.target.value)}
-              onKeyDown={(e) => e.key === 'Enter' && handleCreate()}
-              placeholder="Room name..."
-              maxLength={60}
-              autoFocus
-              className="w-full bg-elevated border border-[var(--border)] rounded-[var(--radius)] px-4 py-2.5 text-sm text-t1 placeholder:text-t3 outline-none focus:border-accent mb-4 transition-colors"
-            />
-            <div className="flex gap-2">
-              <button onClick={() => { setShowCreate(false); setRoomName(''); }} className="flex-1 py-2 rounded-[var(--radius)] border border-[var(--border)] text-t2 hover:text-t1 text-sm transition-colors">Cancel</button>
-              <button onClick={handleCreate} disabled={!roomName.trim() || creating} className="flex-1 py-2 rounded-[var(--radius)] bg-accent text-bg text-sm font-medium disabled:opacity-40 hover:opacity-80 transition-opacity">
-                {creating ? 'Creating...' : 'Create'}
-              </button>
-            </div>
+      {/* ── Create modal ───────────────────────────────────────────────── */}
+      <AnimatePresence>
+        {showCreate && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 z-50 flex items-center justify-center p-4"
+            style={{ background: 'rgba(0,0,0,0.7)', backdropFilter: 'blur(6px)' }}
+            onClick={(e) => { if (e.target === e.currentTarget) { setShowCreate(false); setRoomName(''); } }}
+          >
+            <motion.div
+              initial={{ opacity: 0, scale: 0.94, y: 16 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.94, y: 16 }}
+              className="apple-glass rounded-3xl p-6 w-full max-w-sm"
+            >
+              <h2 className="font-display text-xl mb-1" style={{ color: 'var(--text-1)' }}>Create a Room</h2>
+              <p className="text-xs mb-5" style={{ color: 'var(--text-3)' }}>Give your listening room a name</p>
+
+              <input
+                type="text"
+                value={roomName}
+                onChange={(e) => setRoomName(e.target.value)}
+                onKeyDown={(e) => e.key === 'Enter' && handleCreate()}
+                placeholder="Room name…"
+                maxLength={60}
+                autoFocus
+                className="w-full rounded-2xl px-4 py-3 text-sm outline-none mb-4 transition-colors"
+                style={{
+                  background: 'var(--elevated)',
+                  border: '1.5px solid var(--border)',
+                  color: 'var(--text-1)',
+                }}
+                onFocus={(e) => (e.currentTarget.style.borderColor = 'var(--accent)')}
+                onBlur={(e) => (e.currentTarget.style.borderColor = 'var(--border)')}
+              />
+
+              <div className="flex gap-2">
+                <button
+                  onClick={() => { setShowCreate(false); setRoomName(''); }}
+                  className="flex-1 py-2.5 rounded-2xl text-sm transition-colors hover:opacity-80"
+                  style={{ border: '1px solid var(--border)', color: 'var(--text-2)' }}
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={handleCreate}
+                  disabled={!roomName.trim() || creating}
+                  className="btn-accent flex-1 py-2.5 text-sm"
+                >
+                  {creating ? 'Creating…' : 'Create'}
+                </button>
+              </div>
+            </motion.div>
           </motion.div>
-        </div>
-      )}
+        )}
+      </AnimatePresence>
     </div>
+  );
+}
+
+function SectionLabel({ children }: { children: React.ReactNode }) {
+  return (
+    <p className="text-xs uppercase tracking-widest font-medium mb-3" style={{ color: 'var(--text-3)' }}>
+      {children}
+    </p>
   );
 }

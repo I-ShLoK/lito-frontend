@@ -7,6 +7,7 @@ import toast from 'react-hot-toast';
 import { useStore, QueueItem } from '@/store';
 import { useSocket } from '@/hooks/useSocket';
 import { useAudio } from '@/hooks/useAudio';
+import { useAdaptiveColor } from '@/hooks/useAdaptiveColor';
 import Queue from '@/components/Queue';
 import Chat from '@/components/Chat';
 import People from '@/components/People';
@@ -1036,6 +1037,9 @@ export default function RoomPage() {
   } = useSocket();
 
   useAudio({ isHost, djMode, volume, timeOffsetRef, onTrackEnded: trackEnded, onPlay: play, onPause: pause });
+
+  // Adaptive colour — tints the whole UI to match the current track's artwork
+  useAdaptiveColor(currentTrack?.thumbnailUrl);
 
   useEffect(() => {
     if (!token) { router.replace('/'); return; }

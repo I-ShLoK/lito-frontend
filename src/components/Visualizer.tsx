@@ -12,9 +12,9 @@ export default function Visualizer({ isPlaying, bars = 36, className = '' }: Vis
   return (
     <div className={`flex items-end gap-[2px] ${className}`} style={{ height: 28 }}>
       {Array.from({ length: bars }).map((_, i) => {
-        const height = 8 + Math.random() * 20;
-        const delay = (i / bars) * 1000;
-        const duration = 600 + Math.random() * 600;
+        const height = 6 + Math.random() * 22;
+        const delay = (i / bars) * 900;
+        const duration = 550 + Math.random() * 700;
         return (
           <div
             key={i}
@@ -23,6 +23,7 @@ export default function Visualizer({ isPlaying, bars = 36, className = '' }: Vis
               height: `${height}px`,
               animationDuration: `${duration}ms`,
               animationDelay: `${delay}ms`,
+              // waveform-bar already uses var(--adapt-primary) via CSS
             }}
           />
         );

@@ -6,29 +6,59 @@
 @tailwind components;
 @tailwind utilities;
 
+/* ─── Base theme: red/black ─────────────────────────────────────────── */
 :root {
-  --bg: #000000;
-  --surface: #060708;
-  --elevated: #0d0f11;
-  --accent: #ffffff;
-  --accent-dim: #9ca1a8;
-  --text-1: #f5f7fa;
-  --text-2: #c2c7cf;
-  --text-3: #7c828b;
-  --border: #20252b;
-  --radius: 16px;
+  --bg:           #0a0000;
+  --surface:      #110404;
+  --elevated:     #1a0606;
+  --accent:       #e8213a;
+  --accent-dim:   #7a1020;
+  --accent-glow:  rgba(232, 33, 58, 0.35);
+  --text-1:       #f5f0f0;
+  --text-2:       #c4aeb0;
+  --text-3:       #7a6466;
+  --border:       #2a1416;
+  --radius:       14px;
+
+  /* Adaptive color — updated via JS when track thumbnail changes */
+  --adapt-hue:    0;
+  --adapt-sat:    80%;
+  --adapt-primary:   hsl(var(--adapt-hue), var(--adapt-sat), 55%);
+  --adapt-dim:       hsl(var(--adapt-hue), calc(var(--adapt-sat) * 0.6), 28%);
+  --adapt-glow:      hsla(var(--adapt-hue), var(--adapt-sat), 50%, 0.3);
+  --adapt-bg-tint:   hsla(var(--adapt-hue), calc(var(--adapt-sat) * 0.4), 12%, 0.6);
+}
+
+/* Mono theme override */
+[data-theme="mono"] {
+  --bg:         #000000;
+  --surface:    #080808;
+  --elevated:   #101010;
+  --accent:     #ffffff;
+  --accent-dim: #555555;
+  --accent-glow:rgba(255,255,255,0.2);
+  --text-1:     #f5f5f5;
+  --text-2:     #aaaaaa;
+  --text-3:     #555555;
+  --border:     #1e1e1e;
+  --adapt-primary:  #ffffff;
+  --adapt-dim:      #444444;
+  --adapt-glow:     rgba(255,255,255,0.15);
+  --adapt-bg-tint:  rgba(255,255,255,0.04);
 }
 
 *, *::before, *::after { box-sizing: border-box; }
 
 html {
-  background: radial-gradient(1200px 800px at 20% 0%, #ffffff14 0%, transparent 60%),
-              radial-gradient(900px 600px at 90% 20%, #ffffff0c 0%, transparent 70%),
-              var(--bg);
+  background:
+    radial-gradient(1000px 600px at 15% 0%,  hsla(var(--adapt-hue), var(--adapt-sat), 30%, 0.12) 0%, transparent 65%),
+    radial-gradient(800px  500px at 85% 30%,  hsla(var(--adapt-hue), var(--adapt-sat), 20%, 0.08) 0%, transparent 70%),
+    var(--bg);
   color: var(--text-1);
   font-family: 'Satoshi', system-ui, sans-serif;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
+  transition: background 1.2s ease;
 }
 
 body {
@@ -37,38 +67,21 @@ body {
   overflow-x: hidden;
 }
 
-.safe-pb {
-  padding-bottom: calc(env(safe-area-inset-bottom, 0px) + 12px);
-}
-
-.safe-pt {
-  padding-top: calc(env(safe-area-inset-top, 0px) + 8px);
-}
+.safe-pb { padding-bottom: calc(env(safe-area-inset-bottom, 0px) + 12px); }
+.safe-pt { padding-top:    calc(env(safe-area-inset-top,    0px) + 8px);  }
 
 h1, h2, h3, .font-display { font-family: 'Clash Display', system-ui, sans-serif; }
 
-::-webkit-scrollbar { width: 6px; height: 6px; }
-::-webkit-scrollbar-track { background: transparent; }
-::-webkit-scrollbar-thumb { background: var(--border); border-radius: 99px; }
+::-webkit-scrollbar        { width: 4px; height: 4px; }
+::-webkit-scrollbar-track  { background: transparent; }
+::-webkit-scrollbar-thumb  { background: var(--border); border-radius: 99px; }
 
-@keyframes waveform-pulse {
-  0%, 100% { transform: scaleY(0.3); }
-  50% { transform: scaleY(1); }
-}
-.waveform-bar {
-  width: 3px;
-  border-radius: 99px;
-  background: var(--accent);
-  transform-origin: bottom;
-  animation: waveform-pulse 1s ease-in-out infinite;
-}
-.waveform-bar.paused { animation-play-state: paused; transform: scaleY(0.3); }
-
+/* ─── Adaptive ambient background blobs ─────────────────────────────── */
 @keyframes mesh-drift {
-  0%   { transform: translate(0, 0) scale(1); }
-  33%  { transform: translate(-20px, 22px) scale(1.04); }
-  66%  { transform: translate(16px, -18px) scale(0.96); }
-  100% { transform: translate(0, 0) scale(1); }
+  0%   { transform: translate(0,   0)   scale(1);    }
+  33%  { transform: translate(-18px, 22px) scale(1.05); }
+  66%  { transform: translate(14px, -16px) scale(0.95); }
+  100% { transform: translate(0,   0)   scale(1);    }
 }
 
 .mesh-bg {
@@ -82,53 +95,122 @@ h1, h2, h3, .font-display { font-family: 'Clash Display', system-ui, sans-serif;
 .mesh-blob {
   position: absolute;
   border-radius: 50%;
-  filter: blur(80px);
-  animation: mesh-drift 18s ease-in-out infinite;
-  opacity: 0.13;
+  filter: blur(90px);
+  animation: mesh-drift 20s ease-in-out infinite;
+  opacity: 0.18;
+  transition: background 1.4s ease, opacity 0.8s ease;
 }
 
+/* ─── Glass surfaces ─────────────────────────────────────────────────── */
 .glass {
-  background: color-mix(in srgb, var(--surface) 84%, transparent);
-  backdrop-filter: blur(18px);
-  border: 1px solid color-mix(in srgb, var(--border) 85%, #ffffff11);
+  background: color-mix(in srgb, var(--surface) 80%, transparent);
+  backdrop-filter: blur(20px) saturate(140%);
+  -webkit-backdrop-filter: blur(20px) saturate(140%);
+  border: 1px solid color-mix(in srgb, var(--border) 80%, rgba(255,255,255,0.08));
 }
 
 .apple-glass {
   background:
-    linear-gradient(140deg, rgba(255, 255, 255, 0.14) 0%, rgba(255, 255, 255, 0.05) 38%, rgba(255, 255, 255, 0.02) 100%),
-    color-mix(in srgb, var(--surface) 66%, transparent);
+    linear-gradient(140deg, rgba(255,255,255,0.10) 0%, rgba(255,255,255,0.04) 40%, transparent 100%),
+    color-mix(in srgb, var(--surface) 70%, transparent);
+  backdrop-filter: blur(32px) saturate(160%);
+  -webkit-backdrop-filter: blur(32px) saturate(160%);
+  border: 1px solid color-mix(in srgb, rgba(255,255,255,0.18) 50%, var(--border));
+  box-shadow:
+    0 20px 60px rgba(0,0,0,0.6),
+    inset 0 1px 0 rgba(255,255,255,0.18),
+    0 0 0 1px rgba(255,255,255,0.04);
+}
+
+/* Adaptive tinted glass — picks up current track colour */
+.adapt-glass {
+  background:
+    linear-gradient(140deg, var(--adapt-bg-tint) 0%, rgba(0,0,0,0) 60%),
+    color-mix(in srgb, var(--surface) 72%, transparent);
   backdrop-filter: blur(28px) saturate(150%);
   -webkit-backdrop-filter: blur(28px) saturate(150%);
-  border: 1px solid color-mix(in srgb, #ffffff 24%, var(--border));
-  box-shadow:
-    0 24px 45px rgba(0, 0, 0, 0.5),
-    inset 0 1px 0 rgba(255, 255, 255, 0.28),
-    0 0 0 1px rgba(255, 255, 255, 0.06);
+  border: 1px solid color-mix(in srgb, var(--adapt-dim) 40%, var(--border));
+  box-shadow: 0 0 0 1px rgba(255,255,255,0.04), 0 24px 48px rgba(0,0,0,0.55);
+  transition: background 1.2s ease, border-color 1.2s ease;
 }
 
-.glow-accent {
-  position: relative;
-}
-
+/* ─── Accent glow helper ─────────────────────────────────────────────── */
+.glow-accent { position: relative; }
 .glow-accent::before {
   content: '';
   position: absolute;
   inset: -1px;
   border-radius: inherit;
-  background: radial-gradient(100% 80% at 50% 0%, rgba(255, 255, 255, 0.22), rgba(255, 255, 255, 0) 72%);
+  background: radial-gradient(100% 80% at 50% 0%, var(--accent-glow), transparent 70%);
   pointer-events: none;
 }
 
+/* ─── Skeleton loader ────────────────────────────────────────────────── */
 @keyframes skeleton-pulse {
   0%, 100% { opacity: 1; }
-  50% { opacity: 0.42; }
+  50%       { opacity: 0.4; }
 }
 .skeleton {
   background: var(--elevated);
   border-radius: var(--radius);
-  animation: skeleton-pulse 1.5s ease-in-out infinite;
+  animation: skeleton-pulse 1.6s ease-in-out infinite;
 }
 
+/* ─── Waveform visualiser ────────────────────────────────────────────── */
+@keyframes waveform-pulse {
+  0%, 100% { transform: scaleY(0.25); }
+  50%       { transform: scaleY(1); }
+}
+.waveform-bar {
+  width: 3px;
+  border-radius: 99px;
+  background: var(--adapt-primary);
+  transform-origin: bottom;
+  animation: waveform-pulse 1s ease-in-out infinite;
+  transition: background 1.2s ease;
+}
+.waveform-bar.paused {
+  animation-play-state: paused;
+  transform: scaleY(0.25);
+}
+
+/* ─── Seeker range input ─────────────────────────────────────────────── */
+.seeker-range { -webkit-appearance: none; appearance: none; width: 100%; cursor: pointer; background: transparent; }
+
+.seeker-range::-webkit-slider-runnable-track {
+  height: 4px;
+  border-radius: 999px;
+  background: linear-gradient(
+    to right,
+    var(--adapt-primary) var(--seek-pct, 0%),
+    color-mix(in srgb, var(--border) 80%, transparent) var(--seek-pct, 0%)
+  );
+}
+.seeker-range::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  width: 14px; height: 14px;
+  border-radius: 999px;
+  background: #fff;
+  box-shadow: 0 1px 8px rgba(0,0,0,0.6);
+  margin-top: -5px;
+  transition: transform 0.15s;
+}
+.seeker-range:hover::-webkit-slider-thumb { transform: scale(1.3); }
+
+.seeker-range::-moz-range-track {
+  height: 4px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--border) 80%, transparent);
+}
+.seeker-range::-moz-range-thumb {
+  width: 14px; height: 14px;
+  border-radius: 999px;
+  border: none;
+  background: #fff;
+  box-shadow: 0 1px 8px rgba(0,0,0,0.6);
+}
+
+/* ─── Misc utilities ─────────────────────────────────────────────────── */
 .truncate-2 {
   display: -webkit-box;
   -webkit-line-clamp: 2;
@@ -136,33 +218,48 @@ h1, h2, h3, .font-display { font-family: 'Clash Display', system-ui, sans-serif;
   overflow: hidden;
 }
 
-.seeker-range::-webkit-slider-runnable-track {
-  height: 6px;
-  border-radius: 999px;
-  background: color-mix(in srgb, #ffffff 75%, #666);
+.no-theme-transition { transition: none !important; }
+
+/* Live badge pulse */
+@keyframes live-pulse {
+  0%, 100% { opacity: 1;   box-shadow: 0 0 0 0 var(--accent-glow); }
+  50%       { opacity: 0.7; box-shadow: 0 0 0 4px transparent; }
+}
+.live-dot {
+  animation: live-pulse 2s ease-in-out infinite;
 }
 
-.seeker-range::-webkit-slider-thumb {
-  -webkit-appearance: none;
-  width: 28px;
-  height: 28px;
+/* ─── Accent button ──────────────────────────────────────────────────── */
+.btn-accent {
+  background: var(--accent);
+  color: #fff;
   border-radius: 999px;
-  background: #fff;
-  box-shadow: 0 2px 12px rgba(0, 0, 0, 0.45);
-  margin-top: -11px;
+  font-weight: 600;
+  transition: opacity 0.15s, transform 0.1s, box-shadow 0.15s;
+  box-shadow: 0 4px 20px var(--accent-glow);
 }
-
-.seeker-range::-moz-range-track {
-  height: 6px;
-  border-radius: 999px;
-  background: color-mix(in srgb, #ffffff 75%, #666);
+.btn-accent:hover:not(:disabled) {
+  opacity: 0.88;
+  box-shadow: 0 6px 28px var(--accent-glow);
 }
+.btn-accent:active:not(:disabled) { transform: scale(0.97); }
+.btn-accent:disabled { opacity: 0.35; box-shadow: none; }
 
-.seeker-range::-moz-range-thumb {
-  width: 28px;
-  height: 28px;
+/* ─── Pill tag ───────────────────────────────────────────────────────── */
+.pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px 10px;
   border-radius: 999px;
-  border: none;
-  background: #fff;
-  box-shadow: 0 2px 12px rgba(0, 0, 0, 0.45);
+  font-size: 11px;
+  font-weight: 500;
+  border: 1px solid var(--border);
+  background: var(--elevated);
+  color: var(--text-3);
+}
+.pill-accent {
+  border-color: var(--adapt-dim);
+  background: color-mix(in srgb, var(--adapt-dim) 30%, transparent);
+  color: var(--adapt-primary);
 }
