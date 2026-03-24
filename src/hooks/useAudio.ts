@@ -27,7 +27,7 @@ export function useAudio({
   const skipDriftUntilRef = useRef(0);
   const lastHardCorrectionRef = useRef(0);
   const pendingPlayRef = useRef(false);
-  const sourceModeRef = useRef<'proxy' | 'stream'>('proxy');
+  const sourceModeRef = useRef<'proxy' | 'stream'>('stream');
   const consecutiveErrorRef = useRef(0);
   const { playbackState, currentTrack, updateLocalPosition } = useStore();
 
@@ -64,10 +64,10 @@ export function useAudio({
 
     audio.pause();
     audio.src = '';
-    sourceModeRef.current = 'proxy';
+    sourceModeRef.current = 'stream';
     consecutiveErrorRef.current = 0;
 
-    const streamUrl = `${API_URL}/api/audio/proxy/${currentTrack.youtubeId}`;
+    const streamUrl = `${API_URL}/api/audio/stream/${currentTrack.youtubeId}`;
     audio.src = streamUrl;
     audio.load();
 
@@ -119,10 +119,11 @@ export function useAudio({
     const expectedMs = getExpected(playbackState);
     const actualMs = audio.currentTime * 1000;
     const drift = Math.abs(expectedMs - actualMs);
-    skipDriftUntilRef.current = Date.now() + 2500;
+    // Briefly pause drift nudges after authoritative server state updates.
+    skipDriftUntilRef.current = Date.now() + 900;
 
     if (playbackState.isPlaying) {
-      if (drift > 600) {
+      if (drift > 420) {
         audio.currentTime = expectedMs / 1000;
       }
       audio.play().then(() => {
@@ -234,16 +235,16 @@ export function useAudio({
       const actual = audio.currentTime * 1000;
       const drift = Math.abs(expected - actual);
 
-      if (drift > 1500 && Date.now() - lastHardCorrectionRef.current > 4000) {
+      if (drift > 1000 && Date.now() - lastHardCorrectionRef.current > 3000) {
         audio.currentTime = expected / 1000;
         lastHardCorrectionRef.current = Date.now();
       } else if (drift > 450) {
-        audio.playbackRate = expected > actual ? 1.02 : 0.98;
+        audio.playbackRate = expected > actual ? 1.04 : 0.96;
       } else if (Math.abs(audio.playbackRate - 1) > 0.001) {
         audio.playbackRate = 1;
       }
 
-      updateLocalPosition(actual);
+      updateLocalPosition(Math.abs(expected - actual) > 220 ? expected : actual);
     }, 250);
 
     return () => clearInterval(driftIntervalRef.current);
@@ -259,9 +260,9 @@ export function useAudio({
       if (!currentSrc) return;
       consecutiveErrorRef.current += 1;
 
-      if (sourceModeRef.current === 'proxy') {
-        sourceModeRef.current = 'stream';
-        audio.src = `${API_URL}/api/audio/stream/${currentTrack?.youtubeId}`;
+      if (sourceModeRef.current === 'stream') {
+        sourceModeRef.current = 'proxy';
+        audio.src = `${API_URL}/api/audio/proxy/${currentTrack?.youtubeId}`;
         audio.load();
         return;
       }

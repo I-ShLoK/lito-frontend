@@ -15,6 +15,17 @@
 
 import { useEffect, useRef } from 'react';
 
+const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3011';
+
+function toAdaptiveThumbSrc(url: string): string {
+  const trimmed = (url || '').trim();
+  if (!trimmed) return '';
+  if (/^https?:\/\//i.test(trimmed)) {
+    return `${API_URL}/api/music/thumb?url=${encodeURIComponent(trimmed)}`;
+  }
+  return trimmed;
+}
+
 function setAdaptVars(h: number, s: number) {
   const root = document.documentElement;
   root.style.setProperty('--adapt-hue', String(Math.round(h)));
@@ -108,6 +119,6 @@ export function useAdaptiveColor(thumbnailUrl: string | undefined | null) {
     img.onerror = () => resetToAccent();
 
     // Add a cache-busting proxy-friendly URL if needed
-    img.src = thumbnailUrl;
+    img.src = toAdaptiveThumbSrc(thumbnailUrl);
   }, [thumbnailUrl]);
 }

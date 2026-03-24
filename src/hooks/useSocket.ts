@@ -34,7 +34,7 @@ export function useSocket() {
     setQueue, setCurrentTrack, setPlaybackState,
     addMessage, setParticipants, markTrackUnplayable,
     setHost, addParticipant, removeParticipant, roomId,
-    updateLocalPosition,
+    updateLocalPosition, clearRoom,
   } = useStore();
 
   const timeOffsetRef = useRef(0);
@@ -182,6 +182,7 @@ export function useSocket() {
         positionMs: state.positionMs,
         timestamp: state.timestamp,
       });
+      updateLocalPosition(state.positionMs);
     });
 
     socket.on('PAUSE', (state: { positionMs: number; timestamp: number }) => {
@@ -191,6 +192,7 @@ export function useSocket() {
         positionMs: state.positionMs,
         timestamp: state.timestamp,
       });
+      updateLocalPosition(state.positionMs);
     });
 
     socket.on('SEEK', (state: { positionMs: number; timestamp: number }) => {
@@ -199,6 +201,15 @@ export function useSocket() {
         positionMs: state.positionMs,
         timestamp: state.timestamp,
       });
+      updateLocalPosition(state.positionMs);
+    });
+
+    socket.on('ROOM_CLOSED', ({ message }: { reason?: string; message?: string }) => {
+      clearRoom();
+      toast(message || 'Room closed due to inactivity');
+      if (typeof window !== 'undefined') {
+        window.location.href = '/browse';
+      }
     });
 
     socket.on('PARTICIPANT_JOINED', (p: { userId: string; username: string }) => {
@@ -244,13 +255,14 @@ export function useSocket() {
       socket.off('HOST_CHANGED');
       socket.off('CHAT_MESSAGE');
       socket.off('TRACK_UNPLAYABLE');
+      socket.off('ROOM_CLOSED');
       socket.off('ERROR');
       socket.off('disconnect');
       socket.off('connect_error');
     };
   }, [token, roomId, getSocket, setQueue, setCurrentTrack, setPlaybackState,
       addMessage, setParticipants, markTrackUnplayable,
-      setHost, addParticipant, removeParticipant, updateLocalPosition, doNtpSync, resolveCurrentTrackFromState]);
+      setHost, addParticipant, removeParticipant, updateLocalPosition, clearRoom, doNtpSync, resolveCurrentTrackFromState]);
 
   useEffect(() => {
     if (!token || !roomId) return;
