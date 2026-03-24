@@ -12,22 +12,40 @@ export interface ThumbProps {
   sizes?: string;
 }
 
-function toThumbSrc(src: string): string {
+function isRemoteUrl(src: string): boolean {
+  return /^https?:\/\//i.test((src || '').trim());
+}
+
+function toProxyThumbSrc(src: string): string {
   const trimmed = (src || '').trim();
   if (!trimmed) return FALLBACK_THUMB;
-  if (/^https?:\/\//i.test(trimmed)) {
+  if (isRemoteUrl(trimmed)) {
     return `${API_URL}/api/music/thumb?url=${encodeURIComponent(trimmed)}`;
   }
   return trimmed;
 }
 
 export default function Thumb({ src, alt, className, style, sizes = '160px' }: ThumbProps) {
-  const resolved = useMemo(() => toThumbSrc(src), [src]);
-  const [currentSrc, setCurrentSrc] = useState(resolved);
+  const trimmedSrc = useMemo(() => (src || '').trim(), [src]);
+  const proxiedSrc = useMemo(() => toProxyThumbSrc(trimmedSrc), [trimmedSrc]);
+  const [currentSrc, setCurrentSrc] = useState(trimmedSrc || FALLBACK_THUMB);
+  const [usingProxy, setUsingProxy] = useState(false);
 
   useEffect(() => {
-    setCurrentSrc(resolved);
-  }, [resolved]);
+    setUsingProxy(false);
+    setCurrentSrc(trimmedSrc || FALLBACK_THUMB);
+  }, [trimmedSrc]);
+
+  const onImageError = () => {
+    if (!usingProxy && isRemoteUrl(trimmedSrc)) {
+      setUsingProxy(true);
+      setCurrentSrc(proxiedSrc);
+      return;
+    }
+    if (currentSrc !== FALLBACK_THUMB) {
+      setCurrentSrc(FALLBACK_THUMB);
+    }
+  };
 
   return (
     <span className={`relative block ${className || ''}`} style={style}>
@@ -37,11 +55,7 @@ export default function Thumb({ src, alt, className, style, sizes = '160px' }: T
         fill
         sizes={sizes}
         unoptimized
-        onError={() => {
-          if (currentSrc !== FALLBACK_THUMB) {
-            setCurrentSrc(FALLBACK_THUMB);
-          }
-        }}
+        onError={onImageError}
         className="object-cover"
         referrerPolicy="no-referrer"
       />

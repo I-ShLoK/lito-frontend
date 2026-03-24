@@ -5,6 +5,19 @@ import { useStore } from '@/store';
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3011';
 
+function shouldPreferProxy(): boolean {
+  if (typeof navigator === 'undefined') return false;
+  const ua = navigator.userAgent.toLowerCase();
+  return /iphone|ipad|ipod|android|mobile/.test(ua);
+}
+
+function sourceUrl(mode: 'proxy' | 'stream', youtubeId?: string): string {
+  if (!youtubeId) return '';
+  return mode === 'proxy'
+    ? `${API_URL}/api/audio/proxy/${youtubeId}`
+    : `${API_URL}/api/audio/stream/${youtubeId}`;
+}
+
 interface UseAudioOptions {
   volume: number;
   timeOffsetRef: React.MutableRefObject<number>;
@@ -27,7 +40,7 @@ export function useAudio({
   const skipDriftUntilRef = useRef(0);
   const lastHardCorrectionRef = useRef(0);
   const pendingPlayRef = useRef(false);
-  const sourceModeRef = useRef<'proxy' | 'stream'>('stream');
+  const sourceModeRef = useRef<'proxy' | 'stream'>(shouldPreferProxy() ? 'proxy' : 'stream');
   const consecutiveErrorRef = useRef(0);
   const { playbackState, currentTrack, updateLocalPosition } = useStore();
 
@@ -43,6 +56,8 @@ export function useAudio({
       audioRef.current = new Audio();
       audioRef.current.preload = 'auto';
       audioRef.current.crossOrigin = 'anonymous';
+      audioRef.current.autoplay = false;
+      (audioRef.current as HTMLAudioElement & { playsInline?: boolean }).playsInline = true;
     }
     return () => {
       if (driftIntervalRef.current) clearInterval(driftIntervalRef.current);
@@ -64,11 +79,10 @@ export function useAudio({
 
     audio.pause();
     audio.src = '';
-    sourceModeRef.current = 'stream';
+    sourceModeRef.current = shouldPreferProxy() ? 'proxy' : 'stream';
     consecutiveErrorRef.current = 0;
 
-    const streamUrl = `${API_URL}/api/audio/stream/${currentTrack.youtubeId}`;
-    audio.src = streamUrl;
+    audio.src = sourceUrl(sourceModeRef.current, currentTrack.youtubeId);
     audio.load();
 
     const syncAndTryPlay = () => {
@@ -262,7 +276,14 @@ export function useAudio({
 
       if (sourceModeRef.current === 'stream') {
         sourceModeRef.current = 'proxy';
-        audio.src = `${API_URL}/api/audio/proxy/${currentTrack?.youtubeId}`;
+        audio.src = sourceUrl('proxy', currentTrack?.youtubeId);
+        audio.load();
+        return;
+      }
+
+      if (sourceModeRef.current === 'proxy') {
+        sourceModeRef.current = 'stream';
+        audio.src = sourceUrl('stream', currentTrack?.youtubeId);
         audio.load();
         return;
       }

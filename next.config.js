@@ -11,6 +11,13 @@ const withPWA = require('next-pwa')({
       urlPattern: /^https?.*\/api\/audio\/proxy\/.*/i,
       handler: 'NetworkOnly',
       options: {
+        cacheName: 'audio-proxy-no-cache',
+      },
+    },
+    {
+      urlPattern: /^https?.*\/api\/audio\/stream\/.*/i,
+      handler: 'NetworkOnly',
+      options: {
         cacheName: 'audio-stream-no-cache',
       },
     },
