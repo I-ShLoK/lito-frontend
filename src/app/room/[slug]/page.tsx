@@ -1051,9 +1051,19 @@ export default function RoomPage() {
       try {
         const res = await api.get(`/api/rooms/${params.slug}`);
         const room = res.data;
+        const roomIdValue = String(room.id ?? '');
+        const roomSlugValue = String(room.slug ?? params.slug ?? '');
+        const roomNameValue = String(room.name ?? 'Room');
+        const roomHostId = String(room.host_id ?? room.hostId ?? '');
 
-        setRoom(room.id, room.slug, room.name, room.host_id);
-        setPlaybackState(room.playbackState);
+        setRoom(roomIdValue, roomSlugValue, roomNameValue, roomHostId);
+        setPlaybackState({
+          trackId: room.playbackState?.trackId ? String(room.playbackState.trackId) : null,
+          positionMs: Number(room.playbackState?.positionMs || 0),
+          isPlaying: Boolean(room.playbackState?.isPlaying),
+          timestamp: Number(room.playbackState?.timestamp || Date.now()),
+          isLooping: Boolean(room.playbackState?.isLooping),
+        });
 
         setQueue(room.queue.map((q: Record<string, unknown>) => ({
           id: String(q.id),
@@ -1078,8 +1088,11 @@ export default function RoomPage() {
 
         setDjMode(Boolean(room.djMode || false));
 
-        if (room.playbackState?.trackId && room.queue?.length > 0) {
-          const t = room.queue[0];
+        if (room.queue?.length > 0) {
+          const activeYoutubeId = room.playbackState?.trackId ? String(room.playbackState.trackId) : null;
+          const t = activeYoutubeId
+            ? (room.queue.find((q: Record<string, unknown>) => String(q.youtube_id || '') === activeYoutubeId) || room.queue[0])
+            : room.queue[0];
           setCurrentTrack({
             id: String(t.track_id),
             youtubeId: String(t.youtube_id),
@@ -1102,7 +1115,7 @@ export default function RoomPage() {
         setUnreadChatCount(0);
         chatInitializedRef.current = true;
 
-        joinRoom(room.id);
+        joinRoom(roomIdValue);
         setLoading(false);
       } catch {
         toast.error('Room not found');
@@ -1491,6 +1504,10 @@ export default function RoomPage() {
 
   const onPlay = () => {
     triggerHaptic();
+    if (!playbackState.trackId && queue.length > 0) {
+      skipNext();
+      return;
+    }
     play(localPositionMs);
   };
   const onPause = () => {
