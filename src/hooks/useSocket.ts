@@ -45,8 +45,15 @@ export function useSocket() {
     queue: QueueItem[],
     trackYoutubeId: string | null
   ): Track | null => {
-    if (!trackYoutubeId) return null;
-    const match = queue.find((q) => q.youtubeId === trackYoutubeId) || queue[0];
+    if (!trackYoutubeId) return queue[0] ? {
+      id: queue[0].trackId,
+      youtubeId: queue[0].youtubeId,
+      title: queue[0].title,
+      artist: queue[0].artist,
+      durationMs: queue[0].durationMs,
+      thumbnailUrl: queue[0].thumbnailUrl,
+    } : null;
+    const match = queue.find((q) => q.youtubeId === trackYoutubeId);
     if (!match) return null;
     return {
       id: match.trackId,
@@ -98,7 +105,7 @@ export function useSocket() {
       globalSocket = null;
     }
 
-    if (!globalSocket || !globalSocket.connected) {
+    if (!globalSocket) {
       globalSocket = io(SOCKET_URL, {
         auth: { token },
         transports: ['polling', 'websocket'],
@@ -107,6 +114,8 @@ export function useSocket() {
         reconnectionAttempts: 10,
       });
       globalSocketToken = token;
+    } else if (!globalSocket.connected && globalSocket.disconnected) {
+      globalSocket.connect();
     }
     socketRef.current = globalSocket;
     return globalSocket;
@@ -157,14 +166,15 @@ export function useSocket() {
     socket.on('TRACK_CHANGED', ({ track, positionMs, timestamp }: { track: Track | null; positionMs?: number; timestamp?: number }) => {
       setCurrentTrack(track);
       // Always reset position to 0 (or server-provided) when track changes
+      const nextPos = positionMs ?? 0;
       setPlaybackState({
         ...useStore.getState().playbackState,
         trackId: track?.youtubeId || null,
-        positionMs: positionMs ?? 0,
+        positionMs: nextPos,
         timestamp: timestamp ?? Date.now(),
         isPlaying: track !== null,
       });
-      updateLocalPosition(0);
+      updateLocalPosition(nextPos);
     });
 
     socket.on('PLAY', (state: { positionMs: number; timestamp: number }) => {

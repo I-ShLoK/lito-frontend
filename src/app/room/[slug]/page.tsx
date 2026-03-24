@@ -1009,7 +1009,7 @@ export default function RoomPage() {
   const playedCanonRef = useRef<string[]>([]);
   const drawerResizeRef = useRef<'left' | 'right' | null>(null);
   const isHost = userId === hostId;
-  const isHostOrDj = true;
+  const isHostOrDj = isHost || djMode;
   const roomArtists = useMemo(() => {
     const map = new Map<string, number>();
     for (const item of queue) {
@@ -1036,7 +1036,16 @@ export default function RoomPage() {
     connectionState,
   } = useSocket();
 
-  useAudio({ volume, timeOffsetRef, onTrackEnded: trackEnded, onPlay: play, onPause: pause });
+  useAudio({
+    volume,
+    timeOffsetRef,
+    onTrackEnded: (endedTrackId?: string) => {
+      if (!isHostOrDj) return;
+      trackEnded(endedTrackId);
+    },
+    onPlay: play,
+    onPause: pause,
+  });
 
   // Adaptive colour — tints the whole UI to match the current track's artwork
   useAdaptiveColor(currentTrack?.thumbnailUrl);
