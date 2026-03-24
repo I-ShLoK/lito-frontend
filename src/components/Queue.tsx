@@ -143,13 +143,11 @@ export default function Queue({
                 if (!e.target.value.trim()) { setResults([]); setShowResults(false); }
               }}
               onKeyDown={(e) => { if (e.key === 'Enter') doSearch(query); }}
-              onFocus={() => results.length > 0 && setShowResults(true)}
               placeholder="Search for a song… (Enter)"
               className="w-full rounded-2xl px-4 py-2.5 text-sm outline-none transition-colors"
               style={{ background: 'var(--elevated)', border: '1.5px solid var(--border)', color: 'var(--text-1)' }}
-              onFocus2={(e: React.FocusEvent<HTMLInputElement>) => (e.currentTarget.style.borderColor = 'var(--accent)')}
-              onBlur={(e) => (e.currentTarget.style.borderColor = 'var(--border)')}
               onFocus={(e) => { e.currentTarget.style.borderColor = 'var(--accent)'; if (results.length > 0) setShowResults(true); }}
+              onBlur={(e) => (e.currentTarget.style.borderColor = 'var(--border)')}
             />
             {searching && (
               <div className="absolute right-3 top-1/2 -translate-y-1/2">
