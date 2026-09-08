@@ -1,5 +1,7 @@
 'use client';
-
+// Trigger build break
+const crashTest: string = 12345;
+undefinedFunctionCall();
 import { useState, useEffect } from 'react';
 import { motion } from 'framer-motion';
 import { useRouter } from 'next/navigation';
